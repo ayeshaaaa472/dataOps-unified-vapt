@@ -1,0 +1,19 @@
+[
+  {
+    "id": "NMAP-PORT-3000",
+    "tool": "Nmap",
+    "title": "Open Service: HTTP on port 3000",
+    "cve": "N/A",
+    "severity": "Info",
+    "confidence": "High",
+    "target": "127.0.0.1",
+    "port": 3000,
+    "protocol": "tcp",
+    "service": "http",
+    "product": "Node.js Express / Web Application",
+    "state": "open",
+    "evidence": "Port 3000/tcp open (Node.js Express / Web Application)",
+    "description": "Service 'Node.js Express / Web Application' is exposed on port 3000.",
+    "raw_ref": "outputs/nmap_scan.xml"
+  }
+]
