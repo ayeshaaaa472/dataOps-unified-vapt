@@ -1,0 +1,20 @@
+[
+  {
+    "pluginId": "40018",
+    "alert": "SQL Injection - SQLite Authentication Bypass",
+    "risk": "High",
+    "confidence": "Medium",
+    "cve": "CVE-2024-XXXX",
+    "evidence": "' or 1=1--",
+    "description": "The login endpoint fails to sanitize user input in the email field, allowing SQL syntax injection to bypass authentication."
+  },
+  {
+    "pluginId": "10038",
+    "alert": "Content Security Policy (CSP) Header Not Set",
+    "risk": "Low",
+    "confidence": "High",
+    "cve": "N/A",
+    "evidence": "Header missing in HTTP response",
+    "description": "Content Security Policy is missing from HTTP headers."
+  }
+]

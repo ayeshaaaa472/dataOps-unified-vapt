@@ -1,0 +1,4 @@
+# Nmap 7.991 scan initiated Tue Nov  3 23:19:24 2026 as: "C:\\Program Files (x86)\\Nmap\\nmap.exe" -sV -p 3000 -oA outputs/nmap_target 127.0.0.1
+Host: 127.0.0.1 (localhost)	Status: Up
+Host: 127.0.0.1 (localhost)	Ports: 3000/open/tcp//ppp?///
+# Nmap done at Tue Nov  3 23:19:40 2026 -- 1 IP address (1 host up) scanned in 16.15 seconds
