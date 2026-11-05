@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 import ipaddress
 import re
 import socket
+from datetime import datetime
 
 def validate_target(target: str) -> bool:
     if not re.match(r"^[a-zA-Z0-9\.\-]+$", target):
@@ -54,35 +55,49 @@ def get_nmap_path() -> str:
 
 def run_nmap_scan(
     target: str = "127.0.0.1",
-    ports: str = "3000",
-    output_xml: str = "outputs/nmap_scan.xml",
+    ports: str = "1-65535",
+    output_xml: str = None,
 ) -> str:
+    """Runs Nmap scan against target and port range.
+
+    Generates a unique timestamped XML file if no output path is given.
+    """
     if not validate_target(target):
-        raise ValueError(f"Invalid target specified: {target}")
-    if not validate_ports(ports):
-        raise ValueError(f"Invalid port specification: {ports}")
+        raise ValueError(f"Invalid target: {target}")
+    if not validate_ports(str(ports)):
+        raise ValueError(f"Invalid port(s): {ports}")
 
-    nmap_bin = get_nmap_path()
+    # Generate a unique timestamped output file for multiple runs
+    if not output_xml:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        sanitized_target = target.replace(".", "_").replace(":", "_")
+        output_xml = f"outputs/nmap_{sanitized_target}_{timestamp}.xml"
+
     os.makedirs(os.path.dirname(output_xml) or ".", exist_ok=True)
+    nmap_executable = get_nmap_path().strip('"')
 
-    # Safe subprocess execution: list of arguments, shell=False prevents shell injection
+    # Base scan arguments
     cmd = [
-        nmap_bin,
+        nmap_executable,
         "-sV",
         "--version-intensity",
         "5",
         "-p",
-        ports,
+        str(ports),
         "-oX",
         output_xml,
         target,
     ]
 
-    print(f"[*] Executing: {' '.join(cmd)}")
+    # Speed optimization for broad ranges (e.g., full 1-65535)
+    if ports == "1-65535" or "-" in str(ports):
+        cmd.insert(2, "-T4")
+
+    print(f"[*] Executing scan on {target} (ports: {ports})...")
     result = subprocess.run(cmd, capture_output=True, text=True, shell=False)
 
     if result.returncode != 0:
-        raise RuntimeError(f"Scan failed: {result.stderr}")
+        raise RuntimeError(f"Nmap execution failed: {result.stderr}")
 
     return output_xml
 
@@ -164,17 +179,42 @@ def parse_nmap_xml(xml_file_path: str) -> list:
     return findings
 
 def execute_and_export(
-    target: str,
-    ports: str,
+    target: str = "127.0.0.1",
+    ports: str = "1-65535",
     json_out: str = "outputs/nmap_findings.json",
-):
+) -> list:
+    """Executes the scan, parses findings, and updates the shared findings JSON.
+
+    Maintains persistence across multiple runs by merging new findings.
+    """
     xml_path = run_nmap_scan(target=target, ports=ports)
-    findings = parse_nmap_xml(xml_path)
+    new_findings = parse_nmap_xml(xml_path)
 
+    # Load existing findings if file exists so runs don't erase previous targets
+    existing_findings = []
+    if os.path.exists(json_out):
+        try:
+            with open(json_out, "r", encoding="utf-8") as f:
+                existing_findings = json.load(f)
+        except Exception:
+            existing_findings = []
+
+    # De-duplicate findings based on finding ID
+    existing_ids = {item["id"] for item in existing_findings if "id" in item}
+    for finding in new_findings:
+        if finding["id"] not in existing_ids:
+            existing_findings.append(finding)
+            existing_ids.add(finding["id"])
+
+    # Save merged findings for dashboard consumption
     with open(json_out, "w", encoding="utf-8") as f:
-        json.dump(findings, f, indent=2)
+        json.dump(existing_findings, f, indent=2)
 
-    return findings
+    print(
+        f"[+] Scan complete: Discovered {len(new_findings)} open ports on {target}."
+    )
+    print(f"[+] Total accumulated findings in {json_out}: {len(existing_findings)}")
+    return existing_findings
 
 if __name__ == "__main__":
-    execute_and_export(target="127.0.0.1", ports="3000")
+    execute_and_export(target="127.0.0.1", ports="80,443,3000")
