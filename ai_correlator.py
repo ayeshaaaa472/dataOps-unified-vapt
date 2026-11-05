@@ -78,6 +78,10 @@ def run_ai_correlation(
     if candidate_models is None:
         candidate_models = [
            "gemini-flash-latest",
+            "gemini-flash-lite-latest",
+            "gemini-pro-latest",
+            "gemini-2.5-flash-lite",
+            "gemini-3.5-flash-lite",
             "gemini-3.5-flash",
             "gemini-3.6-flash",
             "gemini-3.7-flash",
