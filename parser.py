@@ -1,9 +1,13 @@
 import xml.etree.ElementTree as ET
 import json
 import os
+from urllib.parse import urlparse
 
 def parse_nmap_xml(xml_file_path: str):
-    """Parses Nmap XML output into the standardized finding format."""
+    """
+    Dynamically extracts open ports, detected services, and host IPs
+    from any Nmap XML scan file.
+    """
     findings = []
     if not os.path.exists(xml_file_path):
         return findings
@@ -13,8 +17,9 @@ def parse_nmap_xml(xml_file_path: str):
         root = tree.getroot()
 
         for host in root.findall("host"):
+            # Extract target IP dynamically from host tag
             addr_elem = host.find("address")
-            ip = addr_elem.get("addr") if addr_elem is not None else "127.0.0.1"
+            ip = addr_elem.get("addr") if addr_elem is not None else "Unknown Host"
 
             ports = host.find("ports")
             if ports is None:
@@ -33,16 +38,16 @@ def parse_nmap_xml(xml_file_path: str):
                     service_desc = f"{service_name} {product} {version}".strip()
 
                     findings.append({
-                        "id": f"NMAP-PORT-{port_id}",
+                        "id": f"NMAP-{ip.replace('.', '_')}-{port_id}",
                         "tool": "Nmap",
                         "title": f"Open Service: {service_name.upper()} on Port {port_id}",
                         "cve": "N/A",
-                        "severity": "Info",
+                        "severity": "Info",  # Network exposure is Informational until correlated with a flaw
                         "confidence": "High",
                         "target": ip,
-                        "port": port_id,
+                        "port": str(port_id),
                         "evidence": f"Port {port_id}/tcp open ({service_desc})",
-                        "description": f"Service '{service_desc}' is exposed and accepting traffic on port {port_id}."
+                        "description": f"Service '{service_desc}' is reachable on target {ip}."
                     })
     except Exception as e:
         print(f"Error parsing Nmap XML: {e}")
@@ -50,7 +55,10 @@ def parse_nmap_xml(xml_file_path: str):
     return findings
 
 def parse_zap_json(json_file_path: str):
-    """Parses imported OWASP ZAP JSON reports into the unified finding format."""
+    """
+    Dynamically extracts alerts, exact risk levels, and parses target/port
+    directly from finding URLs for any target.
+    """
     findings = []
     if not os.path.exists(json_file_path):
         return findings
@@ -60,15 +68,35 @@ def parse_zap_json(json_file_path: str):
             data = json.load(f)
 
         for item in data:
+            # Dynamically parse URL to get the exact target and port
+            raw_url = item.get("url", "")
+            parsed_url = urlparse(raw_url)
+            
+            # Extract target hostname/IP
+            target_host = parsed_url.hostname or "Unknown Host"
+            
+            # Extract port (fallback to default protocol ports 80/443 if omitted)
+            if parsed_url.port:
+                target_port = str(parsed_url.port)
+            elif parsed_url.scheme == "https":
+                target_port = "443"
+            elif parsed_url.scheme == "http":
+                target_port = "80"
+            else:
+                target_port = "Unknown"
+
+            # Pull exact risk assigned by scanner
+            scanner_severity = item.get("risk", item.get("riskdesc", "Medium")).split(" ")[0].capitalize()
+
             findings.append({
-                "id": f"ZAP-{item.get('pluginId', 'UNKNOWN')}",
+                "id": f"ZAP-{item.get('pluginId', 'ALERT')}",
                 "tool": "OWASP ZAP",
                 "title": item.get("alert", "Vulnerability Detected"),
                 "cve": item.get("cve", "N/A"),
-                "severity": item.get("risk", "Medium"),
+                "severity": scanner_severity,
                 "confidence": item.get("confidence", "Medium"),
-                "target": "127.0.0.1",
-                "port": "3000",
+                "target": target_host,
+                "port": target_port,
                 "evidence": item.get("evidence", "Observed payload response"),
                 "description": item.get("description", "")
             })
@@ -76,14 +104,3 @@ def parse_zap_json(json_file_path: str):
         print(f"Error parsing ZAP JSON: {e}")
 
     return findings
-
-if __name__ == "__main__":
-    nmap_path = os.path.join("outputs", "nmap_target.xml")
-    zap_path = os.path.join("imports", "sample_zap_report.json")
-
-    nmap_results = parse_nmap_xml(nmap_path)
-    zap_results = parse_zap_json(zap_path)
-
-    all_findings = nmap_results + zap_results
-    print(f"[+] Loaded {len(all_findings)} total findings:")
-    print(json.dumps(all_findings, indent=2))
