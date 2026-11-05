@@ -1,9 +1,11 @@
 import streamlit as st
+import pandas as pd
 import datetime
 import os
 from urllib.parse import urlparse
 from parser import parse_nmap_xml, parse_zap_json
-from scanner import run_nmap_scan
+from nmap_scanner import run_nmap_scan, execute_and_export, validate_target, validate_ports
+
 
 st.set_page_config(page_title="VAPT Triage Copilot", layout="wide")
 
@@ -20,15 +22,13 @@ def add_audit_entry(action: str, status: str):
     })
 
 def is_scope_allowed(target_str: str) -> bool:
-    """Verifies target is within authorized local lab boundaries."""
+    """Validates that the target is a valid IP or hostname."""
     clean_target = target_str.strip().lower()
     if not clean_target.startswith(("http://", "https://")):
         clean_target = "http://" + clean_target
     parsed = urlparse(clean_target)
     hostname = parsed.hostname or ""
-    # Permitted local lab addresses
-    allowed_hosts = ["127.0.0.1", "localhost"]
-    return hostname in allowed_hosts
+    return validate_target(hostname)
 
 st.title("🛡️ AI VAPT Triage & Prioritization Copilot")
 st.caption("Human-in-the-Loop Security Assessment for Local Containers")
@@ -53,8 +53,13 @@ if st.button("🚀 Start Assessment"):
 
         # 1. Run Live Scanner
         with st.spinner("Running network reconnaissance..."):
-            scan_res = run_nmap_scan(target_ip=target_ip, port=target_port)
-            network_findings = scan_res.get("findings", [])
+            try:
+                network_findings = execute_and_export(
+                    target=target_ip, ports=target_port
+                )
+            except Exception as e:
+                st.error(f"Scanner error: {e}")
+                network_findings = []
 
         # 2. Ingest Application Scans (ZAP/Burp imports)
         zap_file = os.path.join("imports", "sample_zap_report.json")
