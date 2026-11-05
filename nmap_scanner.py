@@ -183,38 +183,16 @@ def execute_and_export(
     ports: str = "1-65535",
     json_out: str = "outputs/nmap_findings.json",
 ) -> list:
-    """Executes the scan, parses findings, and updates the shared findings JSON.
-
-    Maintains persistence across multiple runs by merging new findings.
-    """
+    """Executes the scan, parses findings, and writes the current scan's findings to json_out."""
     xml_path = run_nmap_scan(target=target, ports=ports)
     new_findings = parse_nmap_xml(xml_path)
 
-    # Load existing findings if file exists so runs don't erase previous targets
-    existing_findings = []
-    if os.path.exists(json_out):
-        try:
-            with open(json_out, "r", encoding="utf-8") as f:
-                existing_findings = json.load(f)
-        except Exception:
-            existing_findings = []
-
-    # De-duplicate findings based on finding ID
-    existing_ids = {item["id"] for item in existing_findings if "id" in item}
-    for finding in new_findings:
-        if finding["id"] not in existing_ids:
-            existing_findings.append(finding)
-            existing_ids.add(finding["id"])
-
-    # Save merged findings for dashboard consumption
+    # Overwrite outputs/nmap_findings.json with the active scan's discoveries
     with open(json_out, "w", encoding="utf-8") as f:
-        json.dump(existing_findings, f, indent=2)
+        json.dump(new_findings, f, indent=2)
 
-    print(
-        f"[+] Scan complete: Discovered {len(new_findings)} open ports on {target}."
-    )
-    print(f"[+] Total accumulated findings in {json_out}: {len(existing_findings)}")
-    return existing_findings
+    # Return only the findings from this specific run
+    return new_findings
 
 if __name__ == "__main__":
     execute_and_export(target="127.0.0.1", ports="80,443,3000")
