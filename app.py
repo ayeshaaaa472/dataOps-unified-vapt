@@ -1,12 +1,12 @@
 import os
-import streamlit as st
-import pandas as pd
-from urllib.parse import urlparse
 import datetime
+from urllib.parse import urlparse
+import pandas as pd
+import streamlit as st
 
-# Import scanners and correlator
+# Custom imports
 from parser import parse_zap_json
-from nmap_scanner import execute_and_export, validate_target, validate_ports
+from nmap_scanner import execute_and_export, validate_target
 from ai_correlator import run_ai_correlation
 
 st.set_page_config(page_title="VAPT Triage Copilot", layout="wide")
@@ -14,6 +14,13 @@ st.set_page_config(page_title="VAPT Triage Copilot", layout="wide")
 # Persistent audit log
 if "audit_log" not in st.session_state:
     st.session_state.audit_log = []
+
+if "current_findings" not in st.session_state:
+    st.session_state["current_findings"] = []
+
+if "triage_report" not in st.session_state:
+    st.session_state["triage_report"] = None
+
 
 def add_audit_entry(action: str, status: str):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -23,6 +30,7 @@ def add_audit_entry(action: str, status: str):
         "status": status
     })
 
+
 def is_scope_allowed(target_str: str) -> bool:
     clean_target = target_str.strip().lower()
     if not clean_target.startswith(("http://", "https://")):
@@ -31,13 +39,14 @@ def is_scope_allowed(target_str: str) -> bool:
     hostname = parsed.hostname or ""
     return validate_target(hostname)
 
+
 # Sidebar Configuration
 st.sidebar.title("⚙️ Engine Configuration")
 gemini_key = st.sidebar.text_input(
-    "Gemini API Key",
+    "Gemini API Key (Optional Override)",
     type="password",
-    value=os.getenv("GEMINI_API_KEY", ""),
-    help="Enter your Google Gemini API key to enable AI-driven correlation."
+    value="",
+    help="Defaults to GEMINI_API_KEY from .env if left blank."
 )
 
 st.title("🛡️ AI VAPT Triage & Prioritization Copilot")
@@ -76,58 +85,64 @@ if st.button("🚀 Start Assessment"):
         all_findings = network_findings + web_findings
         st.session_state["current_findings"] = all_findings
 
-        st.subheader("📊 Ingested Tool Findings")
-        if all_findings:
-            for item in all_findings:
-                with st.expander(f"[{item.get('severity', 'info').upper()}] {item.get('title', 'Finding')} ({item.get('tool', 'tool')})"):
-                    st.write(f"**Target:** `{item.get('target', target_ip)}:{item.get('port', target_port)}`")
-                    st.write(f"**Evidence:** `{item.get('evidence', 'N/A')}`")
-                    st.write(f"**Description:** {item.get('description', 'N/A')}")
-        else:
-            st.info("No open ports or findings detected for this target.")
+        # 3. Trigger AI Correlation Engine
+        effective_key = gemini_key.strip() or os.getenv("GEMINI_API_KEY")
+        with st.spinner("Analyzing threat posture and correlating findings with AI..."):
+            try:
+                analysis = run_ai_correlation(
+                    findings=all_findings,
+                    api_key=effective_key
+                )
+                st.session_state["triage_report"] = analysis
+                provider = analysis.get("provider_used", "AI")
+                add_audit_entry(f"AI correlation completed via {provider}", "SUCCESS")
+            except Exception as err:
+                st.session_state["triage_report"] = None
+                st.error(f"AI correlation failed: {err}")
+                add_audit_entry("AI Correlation", f"FAILED: {err}")
 
-# --- Task 3: AI Correlation Section ---
-if "current_findings" in st.session_state and st.session_state["current_findings"]:
+# --- Render Results ---
+if st.session_state.get("current_findings"):
+    st.subheader("📊 Ingested Tool Findings")
+    for item in st.session_state["current_findings"]:
+        with st.expander(f"[{item.get('severity', 'info').upper()}] {item.get('title', 'Finding')} ({item.get('tool', 'tool')})"):
+            st.write(f"**Target:** `{item.get('target', 'N/A')}:{item.get('port', 'N/A')}`")
+            st.write(f"**Evidence:** `{item.get('evidence', 'N/A')}`")
+            st.write(f"**Description:** {item.get('description', 'N/A')}")
+
+# --- Render AI Triage Analysis ---
+if st.session_state.get("triage_report"):
+    report = st.session_state["triage_report"]
     st.markdown("---")
-    st.subheader("🧠 AI-Driven Risk Prioritization & Correlation")
+    st.header("🧠 AI Contextual Prioritization & Attack Analysis")
 
-    if st.button("⚡ Run AI Correlation & Attack Path Analysis"):
-        if not gemini_key:
-            st.warning("Please provide a Gemini API Key in the left sidebar to proceed.")
-        else:
-            with st.spinner("Analyzing cross-layer findings with Gemini..."):
-                try:
-                    analysis = run_ai_correlation(
-                        findings=st.session_state["current_findings"],
-                        api_key=gemini_key
-                    )
+    score = report.get("overall_risk_score", "UNKNOWN")
+    badge_colors = {
+        "CRITICAL": "red",
+        "HIGH": "orange",
+        "MEDIUM": "blue",
+        "LOW": "green"
+    }
+    badge_color = badge_colors.get(score.upper(), "grey")
 
-                    score = analysis.get("overall_risk_score", "UNKNOWN")
-                    badge_colors = {
-                        "CRITICAL": "red",
-                        "HIGH": "orange",
-                        "MEDIUM": "blue",
-                        "LOW": "green"
-                    }
-                    badge_color = badge_colors.get(score.upper(), "grey")
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.subheader(f"Overall Risk Posture: :{badge_color}[{score.upper()}]")
+    with col2:
+        st.caption(f"Provider: **{report.get('provider_used', 'AI')}**")
 
-                    st.markdown(f"### Contextual Posture: :{badge_color}[{score.upper()}]")
-                    st.write(f"**Executive Summary:** {analysis.get('executive_summary', '')}")
+    st.markdown("#### 📋 Executive Summary")
+    st.info(report.get("executive_summary", "No summary generated."))
 
-                    with st.expander("🔍 Attack Path & Vector Synthesis", expanded=True):
-                        st.write(analysis.get("attack_path_analysis", "No path identified."))
+    st.markdown("#### ⛓️ Attack Path & Vector Synthesis")
+    st.warning(report.get("attack_path_analysis", "No attack chain identified."))
 
-                    st.markdown("#### 🛠️ Prioritized Remediation Roadmap")
-                    actions = analysis.get("prioritized_actions", [])
-                    if actions:
-                        st.dataframe(pd.DataFrame(actions), use_container_width=True)
-                    else:
-                        st.info("No specific actions generated.")
-
-                    add_audit_entry("AI Correlation & Risk Scoring", "SUCCESS")
-                except Exception as err:
-                    st.error(f"Correlation failed: {err}")
-                    add_audit_entry("AI Correlation", f"FAILED: {err}")
+    st.markdown("#### 🎯 Prioritized Defensive Actions")
+    actions = report.get("prioritized_actions", [])
+    if actions:
+        st.dataframe(pd.DataFrame(actions), use_container_width=True)
+    else:
+        st.info("No specific actions generated.")
 
 # Sidebar: Live Audit Log
 st.sidebar.markdown("---")
