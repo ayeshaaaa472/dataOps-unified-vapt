@@ -40,14 +40,8 @@ def is_scope_allowed(target_str: str) -> bool:
     return validate_target(hostname)
 
 
-# Sidebar Configuration
-st.sidebar.title("⚙️ Engine Configuration")
-gemini_key = st.sidebar.text_input(
-    "Gemini API Key (Optional Override)",
-    type="password",
-    value="",
-    help="Defaults to GEMINI_API_KEY from .env if left blank."
-)
+# API Key loaded directly from environment
+gemini_key = os.getenv("GEMINI_API_KEY", "")
 
 st.title("🛡️ AI VAPT Triage & Prioritization Copilot")
 st.caption("Human-in-the-Loop Security Assessment & Contextual Risk Prioritization")
@@ -84,7 +78,6 @@ if st.button("🚀 Start Assessment"):
                 network_findings = []
 
         # 2. Ingest Application Scans (ZAP)
-      # 2. Ingest Application Scans (ZAP)
         web_findings = []
         if uploaded_zap_file is not None:
             temp_path = os.path.join("imports", "uploaded_zap.json")
@@ -119,14 +112,49 @@ if st.button("🚀 Start Assessment"):
                 st.error(f"AI correlation failed: {err}")
                 add_audit_entry("AI Correlation", f"FAILED: {err}")
 
-# --- Render Results ---
+# --- Task 5: Evidence Viewer & Confidence Tags ---
 if st.session_state.get("current_findings"):
-    st.subheader("📊 Ingested Tool Findings")
-    for item in st.session_state["current_findings"]:
-        with st.expander(f"[{item.get('severity', 'info').upper()}] {item.get('title', 'Finding')} ({item.get('tool', 'tool')})"):
-            st.write(f"**Target:** `{item.get('target', 'N/A')}:{item.get('port', 'N/A')}`")
-            st.write(f"**Evidence:** `{item.get('evidence', 'N/A')}`")
-            st.write(f"**Description:** {item.get('description', 'N/A')}")
+    st.subheader(f"📊 Verified Findings & Evidence Cards ({len(st.session_state['current_findings'])})")
+
+    ai_tag_lookup = {}
+    if st.session_state.get("triage_report"):
+        for entry in st.session_state["triage_report"].get("analyzed_findings", []):
+            ai_tag_lookup[entry.get("finding_id")] = entry
+
+    for idx, item in enumerate(st.session_state["current_findings"]):
+        fid = item.get("id", f"F-{idx+1}")
+        title = item.get("title", "Finding")
+        tool = item.get("tool", "Scanner")
+        severity = item.get("severity", "INFO").upper()
+        raw_evidence = item.get("evidence", "No explicit payload or banner captured.")
+        description = item.get("description", "No description available.")
+        target_endpoint = f"{item.get('target', 'N/A')}:{item.get('port', 'N/A')}"
+
+        ai_data = ai_tag_lookup.get(fid, {})
+        confidence = ai_data.get("confidence")
+        if not confidence:
+            confidence = "HIGH" if raw_evidence and raw_evidence != "N/A" else "MEDIUM"
+
+        conf_colors = {"HIGH": "green", "MEDIUM": "orange", "LOW": "gray"}
+        conf_badge = f":{conf_colors.get(confidence.upper(), 'gray')}[{confidence.upper()} CONFIDENCE]"
+
+        ai_reason = ai_data.get(
+            "ai_reason",
+            f"Vulnerability observed via {tool}. Verify network exposure on port {item.get('port', 'N/A')}."
+        )
+
+        with st.expander(f"[{severity}] {title} ({tool}) — {conf_badge}", expanded=True):
+            col_meta1, col_meta2 = st.columns(2)
+            with col_meta1:
+                st.markdown(f"**Target:** `{target_endpoint}`")
+                st.markdown(f"**Origin Tool:** `{tool}` (ID: `{fid}`)")
+            with col_meta2:
+                st.markdown(f"**Confidence Rating:** {conf_badge}")
+
+            st.markdown(f"**Description:** {description}")
+            st.info(f"💡 **AI Reason Tag:** {ai_reason}")
+            st.markdown("**🔬 Raw Tool Snippet & Payload:**")
+            st.code(raw_evidence, language="bash" if "nmap" in tool.lower() else "http")
 
 # --- Render AI Triage Analysis ---
 if st.session_state.get("triage_report"):
@@ -163,7 +191,6 @@ if st.session_state.get("triage_report"):
         st.info("No specific actions generated.")
 
 # Sidebar: Live Audit Log
-st.sidebar.markdown("---")
 st.sidebar.title("📋 Activity Audit Log")
 if st.session_state.audit_log:
     for entry in reversed(st.session_state.audit_log):

@@ -38,13 +38,21 @@ Analyze the following security assessment findings collected from network scanni
 1. Perform contextual correlation: How do open ports/services amplify or mitigate the identified web vulnerabilities?
 2. Produce an overall contextual risk rating: CRITICAL, HIGH, MEDIUM, or LOW.
 3. Highlight potential attack vectors or chains an adversary could leverage.
-4. Provide a prioritized defensive remediation plan.
+4. Provide confidence ratings and contextual AI reasoning for each finding.
+5. Provide a prioritized defensive remediation plan.
 
 Respond strictly in valid JSON matching this exact structure:
 {{
   "overall_risk_score": "CRITICAL | HIGH | MEDIUM | LOW",
   "executive_summary": "Concise high-level summary of security posture",
   "attack_path_analysis": "Explanation of potential exploitation vectors combining network and application findings",
+  "analyzed_findings": [
+    {{
+      "finding_id": "Finding ID or Tool reference (matching the input id)",
+      "confidence": "HIGH | MEDIUM | LOW",
+      "ai_reason": "Concise justification of why this finding matters or is a risk in this environment"
+    }}
+  ],
   "prioritized_actions": [
     {{
       "priority": 1,
@@ -67,9 +75,7 @@ def _call_groq_fallback(prompt: str) -> Dict[str, Any]:
     client = Groq(api_key=groq_key)
     completion = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "user", "content": prompt}
-        ],
+        messages=[{"role": "user", "content": prompt}],
         response_format={"type": "json_object"},
         temperature=0.2,
     )
@@ -89,6 +95,7 @@ def run_ai_correlation(
             "overall_risk_score": "LOW",
             "executive_summary": "No open findings or services provided for correlation.",
             "attack_path_analysis": "None",
+            "analyzed_findings": [],
             "prioritized_actions": [],
         }
 
@@ -99,7 +106,6 @@ def run_ai_correlation(
     client = genai.Client(api_key=key)
     prompt = build_correlation_prompt(findings)
 
-    # Sequence of models to try if the primary one is busy or unavailable
     if candidate_models is None:
         candidate_models = [
             "gemini-flash-latest",
@@ -128,14 +134,12 @@ def run_ai_correlation(
             return result
         except Exception as err:
             err_str = str(err)
-            # If rate-limited or busy, try the next model in the pool
             if "503" in err_str or "404" in err_str:
                 last_error = err
                 time.sleep(1)
                 continue
             last_error = err
 
-    # If all Gemini models fail, fail over to Groq:
     print("[*] Gemini models exhausted. Failing over to Groq...")
     try:
         return _call_groq_fallback(prompt)
