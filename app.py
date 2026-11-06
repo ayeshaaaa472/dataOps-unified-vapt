@@ -54,6 +54,12 @@ st.caption("Human-in-the-Loop Security Assessment & Contextual Risk Prioritizati
 
 target_input = st.text_input("Target Scope (Local sandbox):", "127.0.0.1:3000")
 
+uploaded_zap_file = st.file_uploader(
+    "Upload OWASP ZAP Report (JSON)",
+    type=["json"],
+    help="Upload an exported ZAP report to correlate against network findings.",
+)
+
 if st.button("🚀 Start Assessment"):
     clean_target = target_input.strip()
     if not clean_target.startswith(("http://", "https://")):
@@ -78,8 +84,20 @@ if st.button("🚀 Start Assessment"):
                 network_findings = []
 
         # 2. Ingest Application Scans (ZAP)
-        zap_file = os.path.join("imports", "sample_zap_report.json")
-        web_findings = parse_zap_json(zap_file) if os.path.exists(zap_file) else []
+      # 2. Ingest Application Scans (ZAP)
+        web_findings = []
+        if uploaded_zap_file is not None:
+            temp_path = os.path.join("imports", "uploaded_zap.json")
+            os.makedirs("imports", exist_ok=True)
+            with open(temp_path, "wb") as f:
+                f.write(uploaded_zap_file.getbuffer())
+            web_findings = parse_zap_json(temp_path)
+            add_audit_entry(f"Loaded uploaded report: {uploaded_zap_file.name}", "OK")
+        else:
+            zap_file = os.path.join("imports", "sample_zap_report.json")
+            if os.path.exists(zap_file):
+                web_findings = parse_zap_json(zap_file)
+                add_audit_entry("Loaded default sample ZAP report", "FALLBACK")
 
         # Merge findings
         all_findings = network_findings + web_findings
