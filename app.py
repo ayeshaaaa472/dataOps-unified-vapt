@@ -8,10 +8,11 @@ import streamlit as st
 from parser import parse_zap_json
 from nmap_scanner import execute_and_export, validate_target
 from ai_correlator import run_ai_correlation
+from prober import execute_benign_probe
 
 st.set_page_config(page_title="VAPT Triage Copilot", layout="wide")
 
-# Persistent audit log
+# Persistent state
 if "audit_log" not in st.session_state:
     st.session_state.audit_log = []
 
@@ -20,6 +21,10 @@ if "current_findings" not in st.session_state:
 
 if "triage_report" not in st.session_state:
     st.session_state["triage_report"] = None
+
+# Task 6: Store HITL Decisions and Probe Results
+if "hitl_decisions" not in st.session_state:
+    st.session_state["hitl_decisions"] = {}
 
 
 def add_audit_entry(action: str, status: str):
@@ -112,7 +117,7 @@ if st.button("🚀 Start Assessment"):
                 st.error(f"AI correlation failed: {err}")
                 add_audit_entry("AI Correlation", f"FAILED: {err}")
 
-# --- Task 5: Evidence Viewer & Confidence Tags ---
+# --- Task 5 & Task 6: Evidence Viewer & HITL Verification Cards ---
 if st.session_state.get("current_findings"):
     st.subheader(f"📊 Verified Findings & Evidence Cards ({len(st.session_state['current_findings'])})")
 
@@ -128,7 +133,18 @@ if st.session_state.get("current_findings"):
         severity = item.get("severity", "INFO").upper()
         raw_evidence = item.get("evidence", "No explicit payload or banner captured.")
         description = item.get("description", "No description available.")
-        target_endpoint = f"{item.get('target', 'N/A')}:{item.get('port', 'N/A')}"
+
+        # Dynamically inherit target scope entered by the user
+        clean_scoped = target_input.replace("http://", "").replace("https://", "").strip().split("/")[0]
+        scoped_host = clean_scoped.split(":")[0] if ":" in clean_scoped else clean_scoped
+        scoped_port = clean_scoped.split(":")[1] if ":" in clean_scoped else "80"
+
+        raw_target = str(item.get("target", "")).strip()
+        raw_port = str(item.get("port", "")).strip()
+
+        target_host = raw_target if raw_target and "unknown" not in raw_target.lower() and " " not in raw_target else scoped_host
+        target_port = raw_port if raw_port and "unknown" not in raw_port.lower() and raw_port != "None" else scoped_port
+        target_endpoint = f"{target_host}:{target_port}"
 
         ai_data = ai_tag_lookup.get(fid, {})
         confidence = ai_data.get("confidence")
@@ -140,7 +156,7 @@ if st.session_state.get("current_findings"):
 
         ai_reason = ai_data.get(
             "ai_reason",
-            f"Vulnerability observed via {tool}. Verify network exposure on port {item.get('port', 'N/A')}."
+            f"Vulnerability observed via {tool}. Verify network exposure on port {target_port}."
         )
 
         with st.expander(f"[{severity}] {title} ({tool}) — {conf_badge}", expanded=True):
@@ -155,6 +171,42 @@ if st.session_state.get("current_findings"):
             st.info(f"💡 **AI Reason Tag:** {ai_reason}")
             st.markdown("**🔬 Raw Tool Snippet & Payload:**")
             st.code(raw_evidence, language="bash" if "nmap" in tool.lower() else "http")
+
+            # --- Task 6: HITL Approval & Benign Probe Gate ---
+            st.markdown("---")
+            st.markdown("##### 🛡️ Human-in-the-Loop Validation Gate")
+            
+            current_status = st.session_state["hitl_decisions"].get(fid, {}).get("status", "PENDING")
+
+            btn_col1, btn_col2, status_col = st.columns([1, 1, 2])
+
+            with btn_col1:
+                if st.button("✅ Approve & Probe", key=f"app_{fid}"):
+                    probe_res = execute_benign_probe(target=target_host, port=target_port)
+                    st.session_state["hitl_decisions"][fid] = {
+                        "status": "APPROVED",
+                        "probe": probe_res
+                    }
+                    add_audit_entry(f"HITL Approved: {fid} -> Benign Probe Executed", "APPROVED")
+                    st.rerun()
+
+            with btn_col2:
+                if st.button("❌ Reject", key=f"rej_{fid}"):
+                    st.session_state["hitl_decisions"][fid] = {
+                        "status": "REJECTED",
+                        "probe": None
+                    }
+                    add_audit_entry(f"HITL Rejected by analyst: {fid}", "REJECTED")
+                    st.rerun()
+
+            with status_col:
+                if current_status == "APPROVED":
+                    probe_data = st.session_state["hitl_decisions"][fid].get("probe") or {}
+                    st.success(f"**Status:** APPROVED | {probe_data.get('message', 'Probe Complete')}")
+                elif current_status == "REJECTED":
+                    st.error("**Status:** REJECTED (Dismissed from active verification)")
+                else:
+                    st.warning("**Status:** PENDING ANALYST REVIEW")
 
 # --- Render AI Triage Analysis ---
 if st.session_state.get("triage_report"):
@@ -185,8 +237,38 @@ if st.session_state.get("triage_report"):
 
     st.markdown("#### 🎯 Prioritized Defensive Actions")
     actions = report.get("prioritized_actions", [])
-    if actions:
-        st.dataframe(pd.DataFrame(actions), use_container_width=True)
+
+    # Filter out actions for findings rejected by the analyst (exact ID and keyword match)
+    rejected_ids = {
+        fid for fid, data in st.session_state.get("hitl_decisions", {}).items()
+        if data.get("status") == "REJECTED"
+    }
+
+    # Find keywords or titles associated with rejected findings
+    rejected_keywords = set()
+    for item in st.session_state.get("current_findings", []):
+        item_id = item.get("id")
+        if item_id in rejected_ids:
+            for word in item.get("title", "").lower().split():
+                if len(word) > 3:
+                    rejected_keywords.add(word)
+
+    active_actions = []
+    for act in actions:
+        act_id = str(act.get("finding_id", "")).strip()
+        act_desc = str(act.get("action", "")).lower()
+
+        # Check direct ID match or substring keyword match
+        direct_match = act_id in rejected_ids or any(rej_id.lower() in act_id.lower() for rej_id in rejected_ids)
+        content_match = any(kw in act_desc or kw in act_id.lower() for kw in rejected_keywords)
+
+        if not (direct_match or content_match):
+            active_actions.append(act)
+
+    if active_actions:
+        st.dataframe(pd.DataFrame(active_actions), use_container_width=True)
+    elif actions and not active_actions:
+        st.success("All actions dismissed — corresponding findings were rejected as false positives.")
     else:
         st.info("No specific actions generated.")
 
