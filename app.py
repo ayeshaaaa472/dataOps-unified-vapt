@@ -49,13 +49,8 @@ def is_scope_allowed(target_str: str) -> bool:
     return validate_target(hostname)
 
 
-<<<<<<< HEAD
 # API Key loaded directly from environment
 gemini_key = os.getenv("GEMINI_API_KEY", "")
-=======
-# Silently load the key in the background
-gemini_key = os.getenv("GEMINI_API_KEY")
->>>>>>> 490df7b (Task 7 complete: Integrated automated VAPT PDF audit report export)
 
 st.title("🛡️ AI VAPT Triage & Prioritization Copilot")
 st.caption("Human-in-the-Loop Security Assessment & Contextual Risk Prioritization")
