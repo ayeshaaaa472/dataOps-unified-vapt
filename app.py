@@ -8,7 +8,14 @@ import streamlit as st
 from parser import parse_zap_json
 from nmap_scanner import execute_and_export, validate_target
 from ai_correlator import run_ai_correlation
+<<<<<<< HEAD
 from prober import execute_benign_probe
+=======
+from dotenv import load_dotenv
+from report_generator import generate_pdf_report
+
+load_dotenv()
+>>>>>>> 490df7b (Task 7 complete: Integrated automated VAPT PDF audit report export)
 
 st.set_page_config(page_title="VAPT Triage Copilot", layout="wide")
 
@@ -45,8 +52,13 @@ def is_scope_allowed(target_str: str) -> bool:
     return validate_target(hostname)
 
 
+<<<<<<< HEAD
 # API Key loaded directly from environment
 gemini_key = os.getenv("GEMINI_API_KEY", "")
+=======
+# Silently load the key in the background
+gemini_key = os.getenv("GEMINI_API_KEY")
+>>>>>>> 490df7b (Task 7 complete: Integrated automated VAPT PDF audit report export)
 
 st.title("🛡️ AI VAPT Triage & Prioritization Copilot")
 st.caption("Human-in-the-Loop Security Assessment & Contextual Risk Prioritization")
@@ -279,3 +291,25 @@ if st.session_state.audit_log:
         st.sidebar.text(f"[{entry['timestamp']}]\n{entry['action']}\nStatus: {entry['status']}\n{'-'*25}")
 else:
     st.sidebar.caption("No activities recorded yet.")
+    
+    # --- Task 7: Report Download Section ---
+if st.session_state.get("triage_report"):
+    st.markdown("---")
+    st.subheader("📄 Export Assessment Report")
+
+    try:
+        pdf_bytes = generate_pdf_report(
+            target=target_input,
+            analysis_data=st.session_state["triage_report"],
+            findings=st.session_state.get("current_findings", []),
+            audit_log=st.session_state.get("audit_log", [])
+        )
+
+        st.download_button(
+            label="📥 Download Full VAPT Audit Report (PDF)",
+            data=pdf_bytes,
+            file_name=f"VAPT_Report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+            mime="application/pdf"
+        )
+    except Exception as e:
+        st.error(f"Error generating PDF report: {e}")
