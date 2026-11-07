@@ -8,14 +8,11 @@ import streamlit as st
 from parser import parse_zap_json
 from nmap_scanner import execute_and_export, validate_target
 from ai_correlator import run_ai_correlation
-<<<<<<< HEAD
 from prober import execute_benign_probe
-=======
 from dotenv import load_dotenv
 from report_generator import generate_pdf_report
 
 load_dotenv()
->>>>>>> 490df7b (Task 7 complete: Integrated automated VAPT PDF audit report export)
 
 st.set_page_config(page_title="VAPT Triage Copilot", layout="wide")
 
@@ -291,7 +288,7 @@ if st.session_state.audit_log:
         st.sidebar.text(f"[{entry['timestamp']}]\n{entry['action']}\nStatus: {entry['status']}\n{'-'*25}")
 else:
     st.sidebar.caption("No activities recorded yet.")
-    
+
     # --- Task 7: Report Download Section ---
 if st.session_state.get("triage_report"):
     st.markdown("---")
