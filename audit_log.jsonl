@@ -1,0 +1,5 @@
+{"timestamp": "2026-11-07 21:18:15", "action": "Scope violation blocked for target: 8.8.8.8", "status": "BLOCKED"}
+{"timestamp": "2026-11-07 21:20:11", "action": "Scope violation blocked for target: 127.", "status": "BLOCKED"}
+{"timestamp": "2026-11-07 21:21:01", "action": "Plan approved by analyst for 127.0.0.1:3000", "status": "AUTHORIZED"}
+{"timestamp": "2026-11-07 21:21:07", "action": "Nmap scan completed: 0 port(s) detected", "status": "OK"}
+{"timestamp": "2026-11-07 21:21:11", "action": "Correlation completed via Google Gemini (gemini-flash-lite-latest)", "status": "OK"}

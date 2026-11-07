@@ -1,191 +1,172 @@
-import json
 import os
-import time
-from typing import Any, Dict, List
-from dotenv import load_dotenv
+import json
+from typing import List, Dict, Any
 from google import genai
 from google.genai import types
 from groq import Groq
 
-# Load environment keys from .env
-load_dotenv()
+def correlate_and_deduplicate(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Groups findings by target and issue, merges duplicates across tools,
+    and cross-correlates web findings against verified open Nmap ports.
+    """
+    deduped = {}
+    open_ports = {
+        str(f.get("port")) for f in findings 
+        if f.get("tool") == "Nmap" and str(f.get("port")) not in ["unknown", "None", ""]
+    }
+
+    for f in findings:
+        key = f"{f.get('target')}:{f.get('port')}:{f.get('title')}"
+        if key in deduped:
+            existing = deduped[key]
+            if "merged_sources" not in existing:
+                existing["merged_sources"] = [existing["tool"]]
+            existing["merged_sources"].append(f["tool"])
+            continue
+
+        f_copy = dict(f)
+        port_str = str(f.get("port"))
+        
+        # Cross-tool verification logic
+        if f.get("tool") != "Nmap" and port_str in open_ports:
+            f_copy["trust_reason"] = f"Verified: Nmap independently confirmed port {port_str} is open and accessible."
+            f_copy["confidence"] = min(1.0, round(float(f_copy.get("confidence", 0.7)) + 0.15, 2))
+        elif f.get("tool") == "Nmap":
+            f_copy["trust_reason"] = "Direct network enumeration: Raw SYN/service response received."
+        else:
+            f_copy["trust_reason"] = "Single source reporting; no cross-tool network confirmation."
+
+        deduped[key] = f_copy
+
+    return list(deduped.values())
 
 
-def build_correlation_prompt(findings: List[Dict[str, Any]]) -> str:
-    findings_summary = []
-    for item in findings:
-        findings_summary.append(
-            {
-                "id": item.get("id"),
-                "tool": item.get("tool"),
-                "title": item.get("title"),
-                "severity": item.get("severity"),
-                "port": item.get("port"),
-                "target": item.get("target"),
-                "evidence": item.get("evidence"),
-                "description": item.get("description"),
-            }
-        )
+def calculate_formulaic_score(findings: List[Dict[str, Any]]) -> str:
+    """
+    Calculates an auditable risk score based on severity weights and confidence.
+    """
+    weight_map = {
+        "CRITICAL": 10,
+        "HIGH": 7,
+        "MEDIUM": 4,
+        "LOW": 1,
+        "INFO": 0
+    }
+    total_score = 0.0
+    for f in findings:
+        sev = str(f.get("severity", "LOW")).upper()
+        conf = float(f.get("confidence", 0.7))
+        total_score += weight_map.get(sev, 1) * conf
 
-    prompt = f"""
-You are an expert Application Security and DevSecOps Risk Assessor.
-Analyze the following security assessment findings collected from network scanning (Nmap) and dynamic web scanning (OWASP ZAP).
-
-### Normalized Tool Findings:
-{json.dumps(findings_summary, indent=2)}
-
-### Objectives:
-1. Perform contextual correlation: How do open ports/services amplify or mitigate the identified web vulnerabilities?
-2. Produce an overall contextual risk rating: CRITICAL, HIGH, MEDIUM, or LOW.
-3. Highlight potential attack vectors or chains an adversary could leverage.
-4. Provide confidence ratings and contextual AI reasoning for each finding.
-5. Provide a prioritized defensive remediation plan.
-
-Respond strictly in valid JSON matching this exact structure:
-{{
-  "overall_risk_score": "CRITICAL | HIGH | MEDIUM | LOW",
-  "executive_summary": "Concise high-level summary of security posture",
-  "attack_path_analysis": "Explanation of potential exploitation vectors combining network and application findings",
-  "analyzed_findings": [
-    {{
-      "finding_id": "Finding ID or Tool reference (matching the input id)",
-      "confidence": "HIGH | MEDIUM | LOW",
-      "ai_reason": "Concise justification of why this finding matters or is a risk in this environment"
-    }}
-  ],
-  "prioritized_actions": [
-    {{
-      "priority": 1,
-      "finding_id": "Finding ID or Tool reference",
-      "action": "Immediate technical remediation step",
-      "owner": "DevOps | Security | Backend Team"
-    }}
-  ]
-}}
-"""
-    return prompt.strip()
+    if total_score >= 12:
+        return "HIGH"
+    elif total_score >= 5:
+        return "MEDIUM"
+    return "LOW"
 
 
-def _call_groq_fallback(prompt: str) -> Dict[str, Any]:
-    """Fallback handler using Groq if Gemini fails."""
-    groq_key = os.getenv("GROQ_API_KEY")
-    if not groq_key:
-        raise ValueError("GROQ_API_KEY missing from environment.")
-
-    client = Groq(api_key=groq_key)
-    completion = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
-        temperature=0.2,
-    )
-    result = json.loads(completion.choices[0].message.content)
-    result["provider_used"] = "Groq (Fallback)"
-    return result
-
-
-def run_ai_correlation(
-    findings: List[Dict[str, Any]],
-    api_key: str = None,
-    candidate_models: List[str] = None,
-) -> Dict[str, Any]:
-    """Sends findings to Gemini with automatic model fallback on 503/404, then Groq."""
+def run_ai_correlation(findings: List[Dict[str, Any]], api_key: str = None) -> Dict[str, Any]:
+    """
+    Executes grounded AI analysis across correlated findings with Gemini -> Groq -> Deterministic fallback.
+    """
     if not findings:
         return {
             "overall_risk_score": "LOW",
-            "executive_summary": "No open findings or services provided for correlation.",
-            "attack_path_analysis": "None",
-            "analyzed_findings": [],
+            "executive_summary": "No vulnerabilities identified in current scope.",
+            "attack_path_analysis": "No attack vectors identified across assessed assets.",
             "prioritized_actions": [],
+            "provider_used": "Deterministic Core"
         }
 
-    key = api_key or os.getenv("GEMINI_API_KEY")
-    if not key:
-        raise ValueError("Gemini API Key missing.")
+    processed_findings = correlate_and_deduplicate(findings)
+    calculated_score = calculate_formulaic_score(processed_findings)
 
-    client = genai.Client(api_key=key)
-    prompt = build_correlation_prompt(findings)
+    system_prompt = (
+        "You are a Senior VAPT Security Assessor. Analyze the findings strictly using the provided evidence.\n"
+        "STRICT RULES:\n"
+        "1. Use ONLY the findings provided. NEVER invent CVE IDs, exploits, or scores.\n"
+        "2. If an asset service or CVE is unknown, state 'N/A' or 'Unknown'.\n"
+        "3. Return ONLY valid JSON matching the requested schema."
+    )
 
-    if candidate_models is None:
-        candidate_models = [
-            "gemini-flash-latest",
-            "gemini-flash-lite-latest",
-            "gemini-pro-latest",
-            "gemini-2.5-flash-lite",
-            "gemini-3.5-flash-lite",
-            "gemini-3.5-flash",
-            "gemini-3.6-flash",
-            "gemini-3.7-flash",
-        ]
+    user_prompt = f"""Target Assessment Findings:
+{json.dumps(processed_findings, indent=2)}
 
-    last_error = None
-    for model_name in candidate_models:
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.2,
-                ),
-            )
-            result = json.loads(response.text)
-            result["provider_used"] = f"Google Gemini ({model_name})"
-            return result
-        except Exception as err:
-            err_str = str(err)
-            if "503" in err_str or "404" in err_str:
-                last_error = err
-                time.sleep(1)
+Computed Formulaic Risk: {calculated_score}
+
+Return a valid JSON object with EXACTLY this structure:
+{{
+  "overall_risk_score": "{calculated_score}",
+  "executive_summary": "Factual 2-sentence summary grounded strictly in the findings.",
+  "attack_path_analysis": "Step-by-step vector synthesis using only the confirmed open ports and alerts.",
+  "prioritized_actions": [
+    {{
+      "priority": 1,
+      "finding_id": "Exact ID from findings",
+      "action": "Specific remediation step",
+      "owner": "DevOps / Backend / SecOps"
+    }}
+  ]
+}}"""
+
+    effective_gemini_key = (api_key or os.getenv("GEMINI_API_KEY", "")).strip()
+
+    # Tier 1: Google Gemini
+    if effective_gemini_key:
+        for model_name in ["gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-1.5-flash"]:
+            try:
+                client = genai.Client(api_key=effective_gemini_key)
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=user_prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_prompt,
+                        response_mime_type="application/json",
+                        temperature=0.1
+                    )
+                )
+                data = json.loads(response.text)
+                data["provider_used"] = f"Google Gemini ({model_name})"
+                data["overall_risk_score"] = calculated_score
+                return data
+            except Exception:
                 continue
-            last_error = err
 
-    print("[*] Gemini models exhausted. Failing over to Groq...")
-    try:
-        return _call_groq_fallback(prompt)
-    except Exception as groq_err:
-        raise RuntimeError(
-            f"All candidate models failed. Last Gemini error: {last_error} | Groq error: {groq_err}"
-        )
+    # Tier 2: Groq Fallback
+    groq_key = os.getenv("GROQ_API_KEY", "").strip()
+    if groq_key:
+        try:
+            client = Groq(api_key=groq_key)
+            chat_completion = client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                model="llama-3.3-70b-versatile",
+                temperature=0.1,
+                response_format={"type": "json_object"}
+            )
+            data = json.loads(chat_completion.choices[0].message.content)
+            data["provider_used"] = "Groq (llama-3.3-70b-versatile)"
+            data["overall_risk_score"] = calculated_score
+            return data
+        except Exception:
+            pass
 
-
-if __name__ == "__main__":
-    print("[*] Starting AI correlation test...")
-
-    from parser import parse_nmap_xml, parse_zap_json
-
-    nmap_path = os.path.join("outputs", "nmap_target.xml")
-    zap_path = os.path.join("imports", "sample_zap_report.json")
-
-    nmap_findings = parse_nmap_xml(nmap_path) if os.path.exists(nmap_path) else []
-    zap_findings = parse_zap_json(zap_path) if os.path.exists(zap_path) else []
-    test_findings = nmap_findings + zap_findings
-
-    if not test_findings:
-        print("[!] No scan files found in outputs/ or imports/. Using synthetic findings...")
-        test_findings = [
+    # Tier 3: Deterministic Fallback
+    return {
+        "overall_risk_score": calculated_score,
+        "executive_summary": f"Assessment identified {len(processed_findings)} total findings. Evaluated posture: {calculated_score}.",
+        "attack_path_analysis": "Automated attack path synthesis unavailable (AI offline). Review open ports and high severity web alerts directly.",
+        "prioritized_actions": [
             {
-                "id": "NMAP-127_0_0_1-3000",
-                "tool": "Nmap",
-                "title": "Open Service: HTTP on Port 3000",
-                "severity": "Info",
-                "target": "127.0.0.1",
-                "port": "3000",
-                "evidence": "Port 3000/tcp open (Node.js Express)",
-                "description": "Port 3000 exposed on local loopback.",
-            },
-            {
-                "id": "ZAP-40012",
-                "tool": "OWASP ZAP",
-                "title": "Cross Site Scripting (Reflected)",
-                "severity": "High",
-                "target": "127.0.0.1",
-                "port": "3000",
-                "evidence": "<script>alert(1)</script>",
-                "description": "Reflected XSS on user profile search query.",
-            },
-        ]
-
-    output = run_ai_correlation(test_findings)
-    print("\n--- Correlation Result ---")
-    print(json.dumps(output, indent=2))
+                "priority": idx + 1,
+                "finding_id": f.get("id"),
+                "action": f"Remediate {f.get('title')} on port {f.get('port')}",
+                "owner": "Security Team"
+            }
+            for idx, f in enumerate(processed_findings[:3])
+        ],
+        "provider_used": "Deterministic Rules (Offline Fallback)"
+    }

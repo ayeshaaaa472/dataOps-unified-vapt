@@ -1,106 +1,112 @@
-import xml.etree.ElementTree as ET
-import json
 import os
+import json
 from urllib.parse import urlparse
+from typing import List, Dict, Any
 
-def parse_nmap_xml(xml_file_path: str):
+def parse_zap_json(file_path: str) -> List[Dict[str, Any]]:
     """
-    Dynamically extracts open ports, detected services, and host IPs
-    from any Nmap XML scan file.
+    Parses OWASP ZAP JSON reports (both modern site-tree and legacy Report formats).
+    Extracts host, port, URL, evidence, and CWE without fabricated CVE data.
     """
     findings = []
-    if not os.path.exists(xml_file_path):
+    if not os.path.exists(file_path):
         return findings
 
     try:
-        tree = ET.parse(xml_file_path)
-        root = tree.getroot()
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return findings
 
-        for host in root.findall("host"):
-            # Extract target IP dynamically from host tag
-            addr_elem = host.find("address")
-            ip = addr_elem.get("addr") if addr_elem is not None else "Unknown Host"
+    # Support both schema formats: "site" array or "Report.sites"
+    sites = []
+    if "site" in data:
+        sites = data["site"] if isinstance(data["site"], list) else [data["site"]]
+    elif "Report" in data and "sites" in data["Report"]:
+        raw_sites = data["Report"]["sites"]
+        sites = raw_sites if isinstance(raw_sites, list) else [raw_sites]
 
-            ports = host.find("ports")
-            if ports is None:
-                continue
+    severity_map = {
+        "3": "HIGH",
+        "2": "MEDIUM",
+        "1": "LOW",
+        "0": "INFO",
+        "HIGH": "HIGH",
+        "MEDIUM": "MEDIUM",
+        "LOW": "LOW",
+        "INFORMATIONAL": "INFO"
+    }
 
-            for port in ports.findall("port"):
-                port_id = port.get("portid")
-                state_elem = port.find("state")
-                state = state_elem.get("state") if state_elem is not None else "unknown"
+    for site in sites:
+        alerts = site.get("alerts", [])
+        if isinstance(alerts, dict):
+            alerts = [alerts]
 
-                if state == "open":
-                    service_elem = port.find("service")
-                    service_name = service_elem.get("name", "unknown") if service_elem is not None else "unknown"
-                    product = service_elem.get("product", "") if service_elem is not None else ""
-                    version = service_elem.get("version", "") if service_elem is not None else ""
-                    service_desc = f"{service_name} {product} {version}".strip()
+        for alert in alerts:
+            raw_risk = str(alert.get("riskcode", alert.get("riskdesc", "1"))).split()[0]
+            severity = severity_map.get(raw_risk.upper(), "LOW")
 
-                    findings.append({
-                        "id": f"NMAP-{ip.replace('.', '_')}-{port_id}",
-                        "tool": "Nmap",
-                        "title": f"Open Service: {service_name.upper()} on Port {port_id}",
-                        "cve": "N/A",
-                        "severity": "Info",  # Network exposure is Informational until correlated with a flaw
-                        "confidence": "High",
-                        "target": ip,
-                        "port": str(port_id),
-                        "evidence": f"Port {port_id}/tcp open ({service_desc})",
-                        "description": f"Service '{service_desc}' is reachable on target {ip}."
-                    })
-    except Exception as e:
-        print(f"Error parsing Nmap XML: {e}")
+            instances = alert.get("instances", [])
+            uri_str = instances[0].get("uri", "") if instances else ""
+            evidence_val = instances[0].get("evidence", "") if instances else ""
+
+            parsed_uri = urlparse(uri_str)
+            host = parsed_uri.hostname or site.get("@host", site.get("@name", "127.0.0.1"))
+            port = str(parsed_uri.port or site.get("@port", "80"))
+
+            cwe_id = alert.get("cweid")
+            cwe_tag = f"CWE-{cwe_id}" if cwe_id and str(cwe_id) != "-1" else "N/A"
+
+            findings.append({
+                "id": f"ZAP-{alert.get('pluginId', 'ALERT')}",
+                "tool": "OWASP ZAP",
+                "title": alert.get("alert", "Application Vulnerability"),
+                "cve": "N/A",  # No invented CVE identifiers
+                "cwe": cwe_tag,
+                "severity": severity,
+                "evidence": evidence_val or alert.get("desc", "Identified by ZAP rule.")[:200],
+                "target": host,
+                "port": port,
+                "raw_ref": file_path,
+                "confidence": 0.8 if str(alert.get("confidence", "2")) in ["2", "Medium"] else 0.9,
+                "status": "Suspected"
+            })
 
     return findings
 
-def parse_zap_json(json_file_path: str):
+def parse_nikto_json(file_path: str) -> List[Dict[str, Any]]:
     """
-    Dynamically extracts alerts, exact risk levels, and parses target/port
-    directly from finding URLs for any target.
+    Parses a Nikto JSON report import to satisfy the 3-tool requirement.
     """
     findings = []
-    if not os.path.exists(json_file_path):
+    if not os.path.exists(file_path):
         return findings
 
     try:
-        with open(json_file_path, "r", encoding="utf-8") as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
+    except Exception:
+        return findings
 
-        for item in data:
-            # Dynamically parse URL to get the exact target and port
-            raw_url = item.get("url", "")
-            parsed_url = urlparse(raw_url)
-            
-            # Extract target hostname/IP
-            target_host = parsed_url.hostname or "Unknown Host"
-            
-            # Extract port (fallback to default protocol ports 80/443 if omitted)
-            if parsed_url.port:
-                target_port = str(parsed_url.port)
-            elif parsed_url.scheme == "https":
-                target_port = "443"
-            elif parsed_url.scheme == "http":
-                target_port = "80"
-            else:
-                target_port = "Unknown"
+    items = data.get("vulnerabilities", data.get("items", []))
+    host = data.get("host", "127.0.0.1")
+    port = str(data.get("port", "80"))
 
-            # Pull exact risk assigned by scanner
-            scanner_severity = item.get("risk", item.get("riskdesc", "Medium")).split(" ")[0].capitalize()
-
-            findings.append({
-                "id": f"ZAP-{item.get('pluginId', 'ALERT')}",
-                "tool": "OWASP ZAP",
-                "title": item.get("alert", "Vulnerability Detected"),
-                "cve": item.get("cve", "N/A"),
-                "severity": scanner_severity,
-                "confidence": item.get("confidence", "Medium"),
-                "target": target_host,
-                "port": target_port,
-                "evidence": item.get("evidence", "Observed payload response"),
-                "description": item.get("description", "")
-            })
-    except Exception as e:
-        print(f"Error parsing ZAP JSON: {e}")
-
+    for item in items:
+        msg = item.get("msg", item.get("description", "Nikto finding"))
+        nikto_id = item.get("id", item.get("OSVDB", "INFO"))
+        findings.append({
+            "id": f"NIKTO-{nikto_id}",
+            "tool": "Nikto (Import)",
+            "title": msg[:80],
+            "cve": "N/A",
+            "cwe": "N/A",
+            "severity": "LOW",
+            "evidence": msg,
+            "target": host,
+            "port": port,
+            "raw_ref": file_path,
+            "confidence": 0.7,
+            "status": "Suspected"
+        })
     return findings

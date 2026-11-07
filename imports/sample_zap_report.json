@@ -1,20 +1,43 @@
-[
-  {
-    "pluginId": "40018",
-    "alert": "SQL Injection - SQLite Authentication Bypass",
-    "risk": "High",
-    "confidence": "Medium",
-    "cve": "CVE-2024-XXXX",
-    "evidence": "' or 1=1--",
-    "description": "The login endpoint fails to sanitize user input in the email field, allowing SQL syntax injection to bypass authentication."
-  },
-  {
-    "pluginId": "10038",
-    "alert": "Content Security Policy (CSP) Header Not Set",
-    "risk": "Low",
-    "confidence": "High",
-    "cve": "N/A",
-    "evidence": "Header missing in HTTP response",
-    "description": "Content Security Policy is missing from HTTP headers."
-  }
-]
+{
+  "site": [
+    {
+      "@name": "http://127.0.0.1:3000",
+      "@host": "127.0.0.1",
+      "@port": "3000",
+      "alerts": [
+        {
+          "pluginId": "40018",
+          "alert": "SQL Injection",
+          "riskcode": "3",
+          "confidence": "2",
+          "cweid": "89",
+          "desc": "SQL injection vulnerability identified on input parameter.",
+          "instances": [
+            {
+              "uri": "http://127.0.0.1:3000/rest/user/login",
+              "method": "POST",
+              "param": "email",
+              "evidence": "' OR 1=1--"
+            }
+          ]
+        },
+        {
+          "pluginId": "10038",
+          "alert": "Content Security Policy (CSP) Header Not Set",
+          "riskcode": "1",
+          "confidence": "3",
+          "cweid": "693",
+          "desc": "Content Security Policy is missing from response headers.",
+          "instances": [
+            {
+              "uri": "http://127.0.0.1:3000/",
+              "method": "GET",
+              "param": "",
+              "evidence": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
