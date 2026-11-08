@@ -52,15 +52,9 @@ if "audit_log" not in st.session_state:
 # ----------------- Sidebar -----------------
 st.sidebar.title("🛠️ Integration Status")
 integration_data = {
-    "Tool": ["Nmap", "OWASP ZAP", "Nikto", "Metasploit", "Burp Suite"],
-    "Type": ["Network", "Web App", "Web Server", "Exploit", "Proxy"],
-    "Status": [
-        "Live Subprocess",
-        "Import (JSON)",
-        "Import (JSON)",
-        "Planned",
-        "Planned",
-    ],
+    "Tool": ["Nmap", "OWASP ZAP", "Nikto"],
+    "Type": ["Network", "Web App", "Web Server"],
+    "Status": ["Live Subprocess", "Import (JSON)", "Import (JSON)"],
 }
 st.sidebar.table(pd.DataFrame(integration_data))
 
