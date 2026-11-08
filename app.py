@@ -33,6 +33,11 @@ def add_audit_entry(action: str, status: str):
     except Exception:
         pass
  
+    try:
+        render_audit_log()
+    except Exception:
+        pass
+ 
 if "audit_log" not in st.session_state:
     st.session_state["audit_log"] = []
     if os.path.exists(AUDIT_LOG_FILE):
@@ -55,11 +60,17 @@ st.sidebar.table(pd.DataFrame(integration_data))
  
 st.sidebar.markdown("---")
 st.sidebar.title("📋 Activity Audit Log")
-if st.session_state["audit_log"]:
-    for entry in reversed(st.session_state["audit_log"][-8:]):
-        st.sidebar.text(f"[{entry['timestamp']}]\n{entry['action']}\nStatus: {entry['status']}\n-------------------------")
-else:
-    st.sidebar.caption("No activities recorded yet.")
+audit_box = st.sidebar.empty()
+ 
+def render_audit_log():
+    with audit_box.container():
+        if st.session_state["audit_log"]:
+            for entry in reversed(st.session_state["audit_log"][-8:]):
+                st.text(f"[{entry['timestamp']}]\n{entry['action']}\nStatus: {entry['status']}\n-------------------------")
+        else:
+            st.caption("No activities recorded yet.")
+ 
+render_audit_log()
  
 # Main Interface
 st.title("🛡️ AI VAPT Triage & Prioritization Copilot")
@@ -90,7 +101,7 @@ target_port = str(parsed.port or "3000")
 # Execution Plan
 st.subheader("📋 Auditable Execution Plan")
 st.info(f"""
-- **Authorized Target Host**: `{target_host}` | **Port**: `{target_port}`
+- **Requested Target Host**: `{target_host}` | **Port**: `{target_port}`
 - **Operator Intent**: {request_intent}
 - **Planned Operations & Justifications**:
   1. `[Network]` **Nmap Service Discovery** (Timeout: 30s) — *Reason: Identify active listening ports to validate web vulnerability exposure.*

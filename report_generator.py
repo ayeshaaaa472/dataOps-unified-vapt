@@ -104,6 +104,8 @@ def generate_pdf_report(
     pdf.set_font("Helvetica", "I", 8)
     pdf.set_x(10)
     pdf.multi_cell(190, 4, "Note: Sections 4 and 5 are AI-generated from the findings before analyst review. Findings later marked 'Rejected by Analyst' in section 7 are excluded from the roadmap but may still be mentioned in this narrative.")
+    pdf.set_x(10)
+    pdf.multi_cell(190, 4, "Data provenance: Nmap results come from a live scan of the lab target. ZAP and Nikto results are imported from files; findings titled 'Sample Data' come from recorded demonstration files, not from a live scan.")
     pdf.ln(3)
  
     # 6. Prioritized Actions
