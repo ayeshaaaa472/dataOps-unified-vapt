@@ -66,6 +66,8 @@ def generate_pdf_report(
     pdf.cell(0, 5, "- Nmap Network Mapper: Live Subprocess Discovery", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(0, 5, f"- OWASP ZAP (Web Application Scan): {zap_label}", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(0, 5, f"- Nikto (Server Configuration): {nikto_label}", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_x(10)
+    pdf.multi_cell(190, 5, "- Nessus, OpenVAS/Greenbone, Burp Suite: Planned (not integrated) | Metasploit: Unsupported (lab-only, human-run)")
     pdf.cell(0, 5, f"- Correlation & Prioritization Engine: {engine_used}", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(3)
 
@@ -128,13 +130,15 @@ def generate_pdf_report(
         conf_pct = int(float(f.get('confidence', 0.8)) * 100)
         pdf.cell(0, 4, f"Target: {clean_text(f.get('target'))}:{clean_text(f.get('port'))} | Confidence: {conf_pct}% | Status: {clean_text(f.get('status', 'Suspected'))}", new_x="LMARGIN", new_y="NEXT")
         pdf.set_x(10)
+        pdf.multi_cell(190, 4, f"Raw Source: {clean_text(f.get('raw_ref', 'N/A'))}")
+        pdf.set_x(10)
         pdf.multi_cell(190, 4, f"Trust Justification: {clean_text(f.get('trust_reason', 'Single tool report'))}")
         pdf.set_x(10)
         pdf.multi_cell(190, 4, f"Evidence: {clean_text(f.get('evidence', 'No raw snippet'))}")
         pdf.ln(2)
     pdf.ln(2)
 
-    # 8. Limitations & Audit Log
+    # 8. Limitations & Audit Trail
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(0, 6, "8. Limitations & Audit Trail", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "", 8)

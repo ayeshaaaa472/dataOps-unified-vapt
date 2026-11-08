@@ -27,7 +27,6 @@ def execute_and_export(target: str = "127.0.0.1", ports: str = "3000") -> List[D
     
     cmd = ["nmap", "-sV", "-p", str(ports), "-oX", xml_output_path, target]
     
-    # Strictly aligned to 30s hard timeout
     subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
     
     findings = []
@@ -51,10 +50,14 @@ def execute_and_export(target: str = "127.0.0.1", ports: str = "3000") -> List[D
                 port_id = port.get("portid")
                 service = port.find("service")
                 
-                # Never guess services: retain raw identifier or mark unknown
                 service_name = service.get("name") if service is not None else "unknown"
-                service_product = service.get("product") if service is not None else ""
-                full_service = f"{service_name} {service_product}".strip() or "unknown service"
+                service_product = (service.get("product") or "") if service is not None else ""
+                service_method = (service.get("method") or "") if service is not None else ""
+                if service_method == "table" and not service_product:
+                    # Nmap only guessed from its port table; it did not identify the service
+                    full_service = f"service unidentified; Nmap port-table guess: {service_name}"
+                else:
+                    full_service = f"{service_name} {service_product}".strip() or "unknown service"
 
                 findings.append({
                     "id": f"NMAP-{port_id}",
@@ -63,11 +66,11 @@ def execute_and_export(target: str = "127.0.0.1", ports: str = "3000") -> List[D
                     "cve": "N/A",
                     "cwe": "N/A",
                     "severity": "LOW",
-                    "evidence": f"Port {port_id}/tcp open. Service reported by banner: {full_service}",
+                    "evidence": f"Port {port_id}/tcp open. Service (Nmap): {full_service}",
                     "target": ip,
                     "port": str(port_id),
                     "raw_ref": xml_output_path,
-                    "confidence": 0.9,  # Numeric float to prevent calculation/UI crash
+                    "confidence": 0.9,
                     "status": "Suspected"
                 })
 

@@ -44,12 +44,12 @@ if "audit_log" not in st.session_state:
         except Exception:
             pass
 
-# Sidebar
+# Sidebar: Full 7-Tool Integration Matrix
 st.sidebar.title("🛠️ Integration Status")
 integration_data = {
-    "Tool": ["Nmap", "OWASP ZAP", "Nikto"],
-    "Layer": ["Network Service", "Web Application", "Web Server Config"],
-    "Status": ["Live Subprocess", "Import (JSON)", "Import (JSON)"]
+    "Tool": ["Nmap", "OWASP ZAP", "Nikto", "Nessus", "OpenVAS", "Burp Suite", "Metasploit"],
+    "Layer": ["Network Service", "Web Application", "Web Server Config", "Infrastructure", "Infrastructure", "Web Testing", "Validation"],
+    "Status": ["Live Subprocess", "Import (JSON)", "Import (JSON)", "Planned", "Planned", "Planned", "Unsupported (lab-only, human-run)"]
 }
 st.sidebar.table(pd.DataFrame(integration_data))
 
@@ -165,6 +165,7 @@ if st.session_state.get("current_findings"):
             with col_f2:
                 st.write("**Raw Tool Snippet:**")
                 st.code(finding.get("evidence", "No raw snippet available"))
+                st.caption(f"Raw source: {finding.get('raw_ref', 'N/A')}")
 
             col_btn1, col_btn2 = st.columns([1, 4])
             with col_btn1:
