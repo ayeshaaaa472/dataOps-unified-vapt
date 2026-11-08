@@ -3,7 +3,6 @@ import json
 from typing import List, Dict, Any
 from google import genai
 from google.genai import types
-from groq import Groq
 
 
 def correlate_and_deduplicate(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -69,7 +68,7 @@ def calculate_formulaic_score(findings: List[Dict[str, Any]]) -> str:
 
 def run_ai_correlation(findings: List[Dict[str, Any]], api_key: str = None) -> Dict[str, Any]:
     """
-    Executes grounded AI analysis across correlated findings with Gemini -> Groq -> Deterministic fallback.
+    Executes grounded AI analysis across correlated findings using gemini-3.8-flash.
     """
     if not findings:
         return {
@@ -113,49 +112,26 @@ Return a valid JSON object with EXACTLY this structure:
 
     effective_gemini_key = (api_key or os.getenv("GEMINI_API_KEY", "")).strip()
 
-    # Tier 1: Google Gemini
     if effective_gemini_key:
-        for model_name in ["gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-1.5-flash"]:
-            try:
-                client = genai.Client(api_key=effective_gemini_key)
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=user_prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_prompt,
-                        response_mime_type="application/json",
-                        temperature=0.1
-                    )
-                )
-                data = json.loads(response.text)
-                data["provider_used"] = f"Google Gemini ({model_name})"
-                data["overall_risk_score"] = calculated_score
-                return data
-            except Exception:
-                continue
-
-    # Tier 2: Groq Fallback
-    groq_key = os.getenv("GROQ_API_KEY", "").strip()
-    if groq_key:
         try:
-            client = Groq(api_key=groq_key)
-            chat_completion = client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                model="llama-3.3-70b-versatile",
-                temperature=0.1,
-                response_format={"type": "json_object"}
+            client = genai.Client(api_key=effective_gemini_key)
+            response = client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    response_mime_type="application/json",
+                    temperature=0.1
+                )
             )
-            data = json.loads(chat_completion.choices[0].message.content)
-            data["provider_used"] = "Groq (llama-3.3-70b-versatile)"
+            data = json.loads(response.text)
+            data["provider_used"] = "Google Gemini (gemini-3.8-flash)"
             data["overall_risk_score"] = calculated_score
             return data
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[ERROR] Gemini generation failed: {e}")
 
-    # Tier 3: Deterministic Fallback
+    # Deterministic Local Fallback
     return {
         "overall_risk_score": calculated_score,
         "executive_summary": f"Assessment identified {len(processed_findings)} total findings. Evaluated posture: {calculated_score}.",
