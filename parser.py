@@ -4,10 +4,7 @@ from urllib.parse import urlparse
 from typing import List, Dict, Any
 
 def parse_zap_json(file_path: str) -> List[Dict[str, Any]]:
-    """
-    Parses OWASP ZAP JSON reports across standard, legacy, and flat formats.
-    Extracts host, port, URL, evidence, and CWE without fabricated CVE data.
-    """
+    """Parses standard, legacy, and flat ZAP exports handling pluginId/pluginid."""
     findings = []
     if not os.path.exists(file_path):
         return findings
@@ -19,17 +16,10 @@ def parse_zap_json(file_path: str) -> List[Dict[str, Any]]:
         return findings
 
     severity_map = {
-        "3": "HIGH",
-        "2": "MEDIUM",
-        "1": "LOW",
-        "0": "INFO",
-        "HIGH": "HIGH",
-        "MEDIUM": "MEDIUM",
-        "LOW": "LOW",
-        "INFORMATIONAL": "INFO"
+        "3": "HIGH", "2": "MEDIUM", "1": "LOW", "0": "INFO",
+        "HIGH": "HIGH", "MEDIUM": "MEDIUM", "LOW": "LOW", "INFORMATIONAL": "INFO"
     }
 
-    # Normalize sites across all known ZAP export variants
     sites = []
     if isinstance(data, list):
         sites = data
@@ -70,14 +60,17 @@ def parse_zap_json(file_path: str) -> List[Dict[str, Any]]:
             host = parsed_uri.hostname or site.get("@host", site.get("@name", "127.0.0.1"))
             port = str(parsed_uri.port or site.get("@port", "3000"))
 
-            cwe_id = alert.get("cweid")
-            cwe_tag = f"CWE-{cwe_id}" if cwe_id and str(cwe_id) != "-1" else "N/A"
+            # Handle both pluginId and lowercase pluginid
+            plugin_id = alert.get("pluginId") or alert.get("pluginid") or "ALERT"
+
+            cwe_id = alert.get("cweid") or alert.get("cweId")
+            cwe_tag = f"CWE-{cwe_id}" if cwe_id and str(cwe_id) not in ["-1", "0"] else "N/A"
 
             findings.append({
-                "id": f"ZAP-{alert.get('pluginId', 'ALERT')}",
+                "id": f"ZAP-{plugin_id}",
                 "tool": "OWASP ZAP",
                 "title": alert.get("alert", "Application Vulnerability"),
-                "cve": "N/A",  # Strictly no fabricated CVEs
+                "cve": "N/A",
                 "cwe": cwe_tag,
                 "severity": severity,
                 "evidence": evidence_val or alert.get("desc", "Identified by ZAP rule.")[:200],
@@ -92,9 +85,7 @@ def parse_zap_json(file_path: str) -> List[Dict[str, Any]]:
 
 
 def parse_nikto_json(file_path: str) -> List[Dict[str, Any]]:
-    """
-    Parses a Nikto JSON report import to satisfy the 3-tool requirement.
-    """
+    """Parses Nikto JSON reports whether formatted as a root dict or raw item list."""
     findings = []
     if not os.path.exists(file_path):
         return findings
@@ -105,13 +96,24 @@ def parse_nikto_json(file_path: str) -> List[Dict[str, Any]]:
     except Exception:
         return findings
 
-    items = data.get("vulnerabilities", data.get("items", []))
-    host = data.get("host", "127.0.0.1")
-    port = str(data.get("port", "80"))
+    items = []
+    host = "127.0.0.1"
+    port = "3000"
+
+    if isinstance(data, list):
+        items = data
+    elif isinstance(data, dict):
+        host = data.get("host", data.get("ip", "127.0.0.1"))
+        port = str(data.get("port", "3000"))
+        items = data.get("vulnerabilities", data.get("items", []))
 
     for item in items:
-        msg = item.get("msg", item.get("description", "Nikto finding"))
-        nikto_id = item.get("id", item.get("OSVDB", "INFO"))
+        if not isinstance(item, dict):
+            continue
+        msg = item.get("msg", item.get("description", "Server configuration issue identified."))
+        nikto_id = item.get("id", item.get("OSVDB", item.get("nikto_id", "ALERT")))
+        item_port = str(item.get("port", port))
+
         findings.append({
             "id": f"NIKTO-{nikto_id}",
             "tool": "Nikto (Import)",
@@ -121,9 +123,10 @@ def parse_nikto_json(file_path: str) -> List[Dict[str, Any]]:
             "severity": "LOW",
             "evidence": msg,
             "target": host,
-            "port": port,
+            "port": item_port,
             "raw_ref": file_path,
             "confidence": 0.7,
             "status": "Suspected"
         })
+
     return findings

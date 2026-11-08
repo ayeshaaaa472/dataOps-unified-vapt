@@ -1,0 +1,14 @@
+[
+  {
+    "id": "999100",
+    "port": "3000",
+    "msg": "Sample Data: Server leaks information via X-Powered-By header: Express",
+    "description": "Server reveals underlying framework technology via response headers."
+  },
+  {
+    "id": "999101",
+    "port": "3000",
+    "msg": "Sample Data: Anti-clickjacking X-Frame-Options header is not present.",
+    "description": "The site lacks protection against clickjacking attacks."
+  }
+]

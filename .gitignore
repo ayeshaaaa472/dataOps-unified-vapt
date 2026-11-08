@@ -221,3 +221,6 @@ __marimo__/
 
 # Secret environment variables
 .env
+outputs/
+audit_log.jsonl
+
