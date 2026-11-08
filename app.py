@@ -49,18 +49,12 @@ if "audit_log" not in st.session_state:
     except Exception:
       pass
 
-# ----------------- Sidebar -----------------
+# ----------------- Sidebar: Active Tools Only -----------------
 st.sidebar.title("🛠️ Integration Status")
 integration_data = {
-    "Tool": ["Nmap", "OWASP ZAP", "Nikto", "Metasploit", "Burp Suite"],
-    "Type": ["Network", "Web App", "Web Server", "Exploit", "Proxy"],
-    "Status": [
-        "Live Subprocess",
-        "Import (JSON)",
-        "Import (JSON)",
-        "Planned",
-        "Planned",
-    ],
+    "Tool": ["Nmap", "OWASP ZAP", "Nikto"],
+    "Layer": ["Network Service", "Web Application", "Web Server Config"],
+    "Status": ["Live Subprocess", "Import (JSON)", "Import (JSON)"],
 }
 st.sidebar.table(pd.DataFrame(integration_data))
 
@@ -82,7 +76,7 @@ st.caption(
     " Prioritization"
 )
 
-# 1. Target Scope & Conversational Intent
+# 1. Target Scope & Conversational Request Intent
 col_scope, col_intent = st.columns([1, 2])
 with col_scope:
   target_input = st.text_input("Target Scope (Lab IP):", "127.0.0.1:3000")
@@ -152,9 +146,9 @@ else:
             "OK",
         )
       except Exception as err:
-        st.error(f"Nmap execution error: {err}")
+        st.warning(f"Nmap execution notice: {err}")
         network_findings = []
-        add_audit_entry(f"Nmap execution failed: {err}", "FAILED")
+        add_audit_entry(f"Nmap execution notice: {err}", "FAILED")
 
       # 2. OWASP ZAP Ingestion
       zap_path = os.path.join("imports", "sample_zap_report.json")
@@ -216,19 +210,31 @@ if st.session_state.get("current_findings"):
         st.write("**Raw Tool Snippet:**")
         st.code(finding.get("evidence", "No raw snippet available"))
 
+      # Safe Probe & Triage Actions
       col_btn1, col_btn2 = st.columns([1, 4])
       with col_btn1:
         if st.button("Approve Safe Probe", key=f"probe_{idx}"):
-          probe_result = execute_benign_probe(
-              finding.get("target"), finding.get("port")
-          )
-          finding["status"] = (
-              f"Probe Verified (HTTP {probe_result.get('status_code')})"
-          )
-          add_audit_entry(
-              f"Benign probe executed on {finding.get('id')}", "VERIFIED"
-          )
+          try:
+            probe_result = execute_benign_probe(
+                finding.get("target"), finding.get("port")
+            )
+            sc = probe_result.get("status_code", 0)
+            finding["status"] = (
+                f"Probe Verified (HTTP {sc})"
+                if sc > 0
+                else "Probe Unreachable (Connection Refused)"
+            )
+            add_audit_entry(
+                f"Benign probe executed on {finding.get('id')} -> {finding['status']}",
+                "VERIFIED",
+            )
+          except Exception as probe_err:
+            finding["status"] = "Probe Failed"
+            add_audit_entry(
+                f"Probe failed on {finding.get('id')}: {probe_err}", "ERROR"
+            )
           st.rerun()
+
       with col_btn2:
         if st.button("Reject Finding", key=f"rej_{idx}"):
           finding["status"] = "Rejected by Analyst"

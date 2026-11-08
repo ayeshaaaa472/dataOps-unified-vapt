@@ -7,8 +7,8 @@ from groq import Groq
 
 def correlate_and_deduplicate(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Groups findings by target and issue, merges duplicates across tools,
-    and cross-correlates web findings against verified open Nmap ports.
+    Groups findings by target and port, merges cross-tool findings,
+    and attaches network port verification as supporting proof.
     """
     deduped = {}
     open_ports = {
@@ -28,9 +28,9 @@ def correlate_and_deduplicate(findings: List[Dict[str, Any]]) -> List[Dict[str, 
         f_copy = dict(f)
         port_str = str(f.get("port"))
         
-        # Cross-tool verification logic
+        # Deterministic cross-tool trust reasoning
         if f.get("tool") != "Nmap" and port_str in open_ports:
-            f_copy["trust_reason"] = f"Verified: Nmap independently confirmed port {port_str} is open and accessible."
+            f_copy["trust_reason"] = f"Verified: Nmap independently confirmed port {port_str} is open and reachable."
             f_copy["confidence"] = min(1.0, round(float(f_copy.get("confidence", 0.7)) + 0.15, 2))
         elif f.get("tool") == "Nmap":
             f_copy["trust_reason"] = "Direct network enumeration: Raw SYN/service response received."
