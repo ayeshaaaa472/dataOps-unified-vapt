@@ -5,6 +5,7 @@ from google import genai
 from google.genai import types
 from groq import Groq
 
+
 def correlate_and_deduplicate(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Groups findings by target and port, merges cross-tool findings,
@@ -33,7 +34,7 @@ def correlate_and_deduplicate(findings: List[Dict[str, Any]]) -> List[Dict[str, 
             f_copy["trust_reason"] = f"Verified: Nmap independently confirmed port {port_str} is open and reachable."
             f_copy["confidence"] = min(1.0, round(float(f_copy.get("confidence", 0.7)) + 0.15, 2))
         elif f.get("tool") == "Nmap":
-            f_copy["trust_reason"] = "Direct network enumeration: Raw SYN/service response received."
+            f_copy["trust_reason"] = "Direct network enumeration: TCP connection and service response received."
         else:
             f_copy["trust_reason"] = "Single source reporting; no cross-tool network confirmation."
 
