@@ -4,18 +4,19 @@ from typing import List, Dict, Any
 from google import genai
 from google.genai import types
 from groq import Groq
-
+ 
+ 
 def correlate_and_deduplicate(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Groups findings by target and issue, merges duplicates across tools,
-    and cross-correlates web findings against verified open Nmap ports.
+    Groups findings by target and port, merges cross-tool findings,
+    and attaches network port verification as supporting proof.
     """
     deduped = {}
     open_ports = {
         str(f.get("port")) for f in findings 
         if f.get("tool") == "Nmap" and str(f.get("port")) not in ["unknown", "None", ""]
     }
-
+ 
     for f in findings:
         key = f"{f.get('target')}:{f.get('port')}:{f.get('title')}"
         if key in deduped:
@@ -24,24 +25,24 @@ def correlate_and_deduplicate(findings: List[Dict[str, Any]]) -> List[Dict[str, 
                 existing["merged_sources"] = [existing["tool"]]
             existing["merged_sources"].append(f["tool"])
             continue
-
+ 
         f_copy = dict(f)
         port_str = str(f.get("port"))
         
-        # Cross-tool verification logic
+        # Deterministic cross-tool trust reasoning
         if f.get("tool") != "Nmap" and port_str in open_ports:
-            f_copy["trust_reason"] = f"Verified: Nmap independently confirmed port {port_str} is open and accessible."
+            f_copy["trust_reason"] = f"Verified: Nmap independently confirmed port {port_str} is open and reachable."
             f_copy["confidence"] = min(1.0, round(float(f_copy.get("confidence", 0.7)) + 0.15, 2))
         elif f.get("tool") == "Nmap":
-            f_copy["trust_reason"] = "Direct network enumeration: Raw SYN/service response received."
+            f_copy["trust_reason"] = "Direct network enumeration: TCP connection and service response received."
         else:
             f_copy["trust_reason"] = "Single source reporting; no cross-tool network confirmation."
-
+ 
         deduped[key] = f_copy
-
+ 
     return list(deduped.values())
-
-
+ 
+ 
 def calculate_formulaic_score(findings: List[Dict[str, Any]]) -> str:
     """
     Calculates an auditable risk score based on severity weights and confidence.
@@ -58,17 +59,17 @@ def calculate_formulaic_score(findings: List[Dict[str, Any]]) -> str:
         sev = str(f.get("severity", "LOW")).upper()
         conf = float(f.get("confidence", 0.7))
         total_score += weight_map.get(sev, 1) * conf
-
+ 
     if total_score >= 12:
         return "HIGH"
     elif total_score >= 5:
         return "MEDIUM"
     return "LOW"
-
-
+ 
+ 
 def run_ai_correlation(findings: List[Dict[str, Any]], api_key: str = None) -> Dict[str, Any]:
     """
-    Executes grounded AI analysis across correlated findings with Gemini -> Groq -> Deterministic fallback.
+    Executes grounded AI analysis across correlated findings using gemini-3.8-flash.
     """
     if not findings:
         return {
@@ -78,10 +79,10 @@ def run_ai_correlation(findings: List[Dict[str, Any]], api_key: str = None) -> D
             "prioritized_actions": [],
             "provider_used": "Deterministic Core"
         }
-
+ 
     processed_findings = correlate_and_deduplicate(findings)
     calculated_score = calculate_formulaic_score(processed_findings)
-
+ 
     system_prompt = (
         "You are a Senior VAPT Security Assessor. Analyze the findings strictly using the provided evidence.\n"
         "STRICT RULES:\n"
@@ -89,12 +90,12 @@ def run_ai_correlation(findings: List[Dict[str, Any]], api_key: str = None) -> D
         "2. If an asset service or CVE is unknown, state 'N/A' or 'Unknown'.\n"
         "3. Return ONLY valid JSON matching the requested schema."
     )
-
+ 
     user_prompt = f"""Target Assessment Findings:
 {json.dumps(processed_findings, indent=2)}
-
+ 
 Computed Formulaic Risk: {calculated_score}
-
+ 
 Return a valid JSON object with EXACTLY this structure:
 {{
   "overall_risk_score": "{calculated_score}",
@@ -109,12 +110,26 @@ Return a valid JSON object with EXACTLY this structure:
     }}
   ]
 }}"""
-
+ 
     effective_gemini_key = (api_key or os.getenv("GEMINI_API_KEY", "")).strip()
-
-    # Tier 1: Google Gemini
+ 
+    ai_errors = []
+    if not effective_gemini_key:
+        ai_errors.append("GEMINI_API_KEY not set")
+ 
+    # Tier 1: Google Gemini (gemini-3.8-flash first, then any other flash model this key can use)
+    gemini_models = ["gemini-3.8-flash"]
     if effective_gemini_key:
-        for model_name in ["gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-1.5-flash"]:
+        try:
+            for m in genai.Client(api_key=effective_gemini_key).models.list():
+                nm = (getattr(m, "name", "") or "").replace("models/", "")
+                acts = getattr(m, "supported_actions", None) or []
+                if "generateContent" in acts and "flash" in nm and nm not in gemini_models and not any(b in nm for b in ("tts", "image", "live", "audio", "embedding", "robotics", "computer-use")):
+                    gemini_models.append(nm)
+            gemini_models = gemini_models[:1] + sorted(gemini_models[1:], reverse=True)[:4]
+        except Exception as list_err:
+            ai_errors.append(f"Gemini model list: {str(list_err)[:150]}")
+        for model_name in gemini_models:
             try:
                 client = genai.Client(api_key=effective_gemini_key)
                 response = client.models.generate_content(
@@ -130,31 +145,35 @@ Return a valid JSON object with EXACTLY this structure:
                 data["provider_used"] = f"Google Gemini ({model_name})"
                 data["overall_risk_score"] = calculated_score
                 return data
-            except Exception:
-                continue
-
+            except Exception as e:
+                print(f"[ERROR] Gemini generation failed ({model_name}): {e}")
+                ai_errors.append(f"Gemini {model_name}: {str(e)[:150]}")
+ 
     # Tier 2: Groq Fallback
     groq_key = os.getenv("GROQ_API_KEY", "").strip()
+    if not groq_key:
+        ai_errors.append("GROQ_API_KEY not set")
     if groq_key:
-        try:
-            client = Groq(api_key=groq_key)
-            chat_completion = client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                model="llama-3.3-70b-versatile",
-                temperature=0.1,
-                response_format={"type": "json_object"}
-            )
-            data = json.loads(chat_completion.choices[0].message.content)
-            data["provider_used"] = "Groq (llama-3.3-70b-versatile)"
-            data["overall_risk_score"] = calculated_score
-            return data
-        except Exception:
-            pass
-
-    # Tier 3: Deterministic Fallback
+        for groq_model in ["openai/gpt-oss-120b", "qwen/qwen3.6-27b"]:
+            try:
+                client = Groq(api_key=groq_key)
+                chat_completion = client.chat.completions.create(
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    model=groq_model,
+                    temperature=0.1,
+                    response_format={"type": "json_object"}
+                )
+                data = json.loads(chat_completion.choices[0].message.content)
+                data["provider_used"] = f"Groq ({groq_model})"
+                data["overall_risk_score"] = calculated_score
+                return data
+            except Exception as groq_err:
+                ai_errors.append(f"Groq {groq_model}: {str(groq_err)[:150]}")
+ 
+    # Deterministic Local Fallback
     return {
         "overall_risk_score": calculated_score,
         "executive_summary": f"Assessment identified {len(processed_findings)} total findings. Evaluated posture: {calculated_score}.",
@@ -168,5 +187,6 @@ Return a valid JSON object with EXACTLY this structure:
             }
             for idx, f in enumerate(processed_findings[:3])
         ],
+        "fallback_reason": " | ".join(ai_errors),
         "provider_used": "Deterministic Rules (Offline Fallback)"
     }

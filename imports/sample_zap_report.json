@@ -7,7 +7,7 @@
       "alerts": [
         {
           "pluginId": "40018",
-          "alert": "SQL Injection",
+          "alert": "Sample Data: SQL Injection",
           "riskcode": "3",
           "confidence": "2",
           "cweid": "89",
@@ -23,7 +23,7 @@
         },
         {
           "pluginId": "10038",
-          "alert": "Content Security Policy (CSP) Header Not Set",
+          "alert": "Sample Data: Content Security Policy (CSP) Header Not Set",
           "riskcode": "1",
           "confidence": "3",
           "cweid": "693",
