@@ -325,6 +325,7 @@ if st.button(" Approve Plan & Execute Assessment", type="primary"):
             add_audit_entry(f"Correlation completed via {triage_analysis.get('provider_used')}", "OK")
 
             status.update(label="✔ Assessment complete", state="complete", expanded=False)
+            st.rerun()
 
 # Results Section
 if st.session_state.get("current_findings"):
@@ -429,27 +430,31 @@ if st.session_state.get("current_findings"):
                 col_btn1, col_btn2, _ = st.columns([1.5, 1.5, 4])
                 with col_btn1:
                     if st.button("⚡ Approve Safe Probe", key=f"probe_{idx}", type="primary"):
-                        if not validate_target(str(finding.get("target"))):
+                        target_to_probe = str(finding.get("target") or "127.0.0.1")
+                        port_to_probe = str(finding.get("port") or target_port)
+                        if not validate_target(target_to_probe):
                             finding["status"] = "Probe blocked: target outside authorized lab scope"
-                            add_audit_entry(f"Probe blocked on {finding.get('id')}: {finding.get('target')}", "BLOCKED")
-                            st.rerun()
-                        try:
-                            probe_result = execute_benign_probe(finding.get("target"), finding.get("port"))
-                            sc = int(probe_result.get("status_code", 0) or 0)
-                            if sc > 0:
-                                finding["status"] = f"Reachable (HTTP {sc}); vulnerability not confirmed"
-                            else:
-                                finding["status"] = "Probe Unreachable (Connection Refused)"
-                            add_audit_entry(f"Benign probe on {finding.get('id')} -> {finding['status']}", "VERIFIED")
-                        except Exception as probe_err:
-                            finding["status"] = "Probe Failed"
-                            add_audit_entry(f"Probe failed on {finding.get('id')}: {probe_err}", "ERROR")
+                            add_audit_entry(f"Probe blocked on {finding.get('id')}: {target_to_probe}", "BLOCKED")
+                        else:
+                            try:
+                                probe_result = execute_benign_probe(target_to_probe, port_to_probe)
+                                sc = int(probe_result.get("status_code", 0) or 0)
+                                if sc > 0:
+                                    finding["status"] = f"Reachable (HTTP {sc}); vulnerability not confirmed"
+                                else:
+                                    finding["status"] = "Probe Unreachable (Connection Refused)"
+                                add_audit_entry(f"Benign probe on {finding.get('id')} -> {finding['status']}", "VERIFIED")
+                            except Exception as probe_err:
+                                finding["status"] = "Probe Failed"
+                                add_audit_entry(f"Probe failed on {finding.get('id')}: {probe_err}", "ERROR")
+                        st.session_state["current_findings"][idx] = finding
                         st.rerun()
                         
                 with col_btn2:
                     if st.button("❌ Reject Finding", key=f"rej_{idx}"):
                         finding["status"] = "Rejected by Analyst"
                         add_audit_entry(f"Finding {finding.get('id')} rejected by analyst", "REJECTED")
+                        st.session_state["current_findings"][idx] = finding
                         st.rerun()
 
     with tab_report:
