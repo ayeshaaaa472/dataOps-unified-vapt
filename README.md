@@ -1,6 +1,6 @@
 # AI VAPT Triage Copilot
  
-A chat-style security assistant that plans an assessment on a safe lab target, combines results from different security tools, explains why it trusts or doubts each finding (with proof attached), and asks a human before doing anything risky.
+A request-driven security assistant: you describe what you want checked in plain language, and it plans an assessment on a safe lab target, combines results from different security tools, explains why it trusts or doubts each finding (with proof attached), and asks a human before doing anything risky.
  
 Built for the DataOps Innovation Hackathon (HackTheCore) on Unstop.
 Problem statement: AI Agent for Automated Penetration Testing.
@@ -121,6 +121,9 @@ More detail on how everything fits together: see ARCHITECTURE.md.
 - AI output can be wrong. A person should always review it.
 - Tested only on Windows against a local OWASP Juice Shop container.
 - No retesting, comparison or export formats other than PDF.
+- The request is entered in plain language and shown as a conversation, but the assessment plan is the same for every request. There is no multi-turn conversation and no adaptive re-planning between steps.
+- Trust reasons are rule-based and simple: a finding is marked as confirmed by Nmap (the same port was seen open) or as single-source. There is no deeper false-positive analysis.
+
 ## Standards
  
 CWE identifiers are shown when an imported ZAP report contains them. The project does not calculate CVSS scores and never generates CVE IDs; unknown values show as N/A. The standards named in the problem statement (NIST SP 800-115, OWASP Top 10, MITRE ATT&CK, NIST CSF 2.0) guided the workflow and the report layout only. Using them does not mean formal compliance.
@@ -148,4 +151,4 @@ LICENSE                  MIT License
  
 ## Future work
  
-Live ZAP and Nikto connections, Nessus and OpenVAS imports, multi-host scope management, retesting and change comparison, remediation tracking, and CVSS-based scoring.
+Multi-turn conversation and adaptive re-planning, live ZAP and Nikto connections, Nessus and OpenVAS imports, multi-host scope management, retesting and change comparison, remediation tracking, and CVSS-based scoring.

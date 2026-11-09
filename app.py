@@ -50,7 +50,7 @@ if "audit_log" not in st.session_state:
             pass
  
 # Sidebar: Full 7-Tool Integration Matrix
-st.sidebar.title("🛠️ Integration Status")
+st.sidebar.title("Integration Status")
 integration_data = {
     "Tool": ["Nmap", "OWASP ZAP", "Nikto"],
     "Type": ["Network", "Web App", "Web Server"],
@@ -59,7 +59,7 @@ integration_data = {
 st.sidebar.table(pd.DataFrame(integration_data))
  
 st.sidebar.markdown("---")
-st.sidebar.title("📋 Activity Audit Log")
+st.sidebar.title("Activity Audit Log")
 audit_box = st.sidebar.empty()
  
 def render_audit_log():
@@ -76,14 +76,7 @@ render_audit_log()
 st.title("🛡️ AI VAPT Triage & Prioritization Copilot")
 st.caption("Human-in-the-Loop Security Assessment, Verification & Contextual Risk Prioritization")
  
-col_scope, col_intent = st.columns([1, 2])
-with col_scope:
-    target_input = st.text_input("Target Scope (Lab IP):", "127.0.0.1:3000")
-with col_intent:
-    request_intent = st.text_input(
-        "Assessment Request (Plain Language):", 
-        "Perform service discovery on port 3000 and correlate ingested web vulnerability alerts."
-    )
+target_input = st.text_input("Target Scope (Lab IP):", "127.0.0.1:3000")
  
 col_upload1, col_upload2 = st.columns(2)
 with col_upload1:
@@ -98,17 +91,32 @@ parsed = urlparse(clean_target)
 target_host = parsed.hostname or "127.0.0.1"
 target_port = str(parsed.port or "3000")
  
-# Execution Plan
-st.subheader("📋 Auditable Execution Plan")
-st.info(f"""
-- **Requested Target Host**: `{target_host}` | **Port**: `{target_port}`
-- **Operator Intent**: {request_intent}
-- **Planned Operations & Justifications**:
-  1. `[Network]` **Nmap Service Discovery** (Timeout: 30s) — *Reason: Identify active listening ports to validate web vulnerability exposure.*
-  2. `[Web]` **OWASP ZAP Ingestion** ({'Custom Upload' if uploaded_zap else 'Sample Dataset'}) — *Reason: Ingest application-layer findings (SQLi, missing security headers).*
-  3. `[Server]` **Nikto Ingestion** ({'Custom Upload' if uploaded_nikto else 'Sample Dataset'}) — *Reason: Discover web server configuration flaws and information disclosures.*
-  4. `[Correlation]` **Deterministic Python Cross-Referencing & Multi-Tier AI Synthesis** — *Reason: Deduplicate findings and elevate confidence on open network ports.*
-""")
+# Conversational request: the analyst types the request in the chat box
+if "request_intent" not in st.session_state:
+    st.session_state["request_intent"] = ""
+chat_text = st.chat_input("Tell the assistant what to assess (for example: Check the web app on port 3000 for exposure)")
+if chat_text:
+    st.session_state["request_intent"] = chat_text.strip()
+request_intent = st.session_state["request_intent"]
+if not request_intent:
+    with st.chat_message("assistant"):
+        st.markdown("Hi! I am your security assessment assistant. Enter a lab target above, then tell me in the chat box below what you want checked. I will show you a plan before anything runs.")
+    st.stop()
+ 
+# Execution Plan (shown as a conversation: analyst request, assistant plan)
+st.subheader("Auditable Execution Plan")
+with st.chat_message("user"):
+    st.markdown(f"**Assessment request:** {request_intent}")
+    st.caption(f"Target: {target_host}:{target_port}")
+with st.chat_message("assistant"):
+    st.markdown(f"""Understood. Before I run anything, here is my plan for `{target_host}:{target_port}`:
+ 
+1. `[Network]` **Nmap Service Discovery** (Timeout: 30s) — *Reason: Identify active listening ports to validate web vulnerability exposure.*
+2. `[Web]` **OWASP ZAP Ingestion** ({'Custom Upload' if uploaded_zap else 'Sample Dataset'}) — *Reason: Ingest application-layer findings (SQLi, missing security headers).*
+3. `[Server]` **Nikto Ingestion** ({'Custom Upload' if uploaded_nikto else 'Sample Dataset'}) — *Reason: Discover web server configuration flaws and information disclosures.*
+4. `[Correlation]` **Deterministic Python Cross-Referencing & Multi-Tier AI Synthesis** — *Reason: Deduplicate findings and elevate confidence on open network ports.*
+ 
+**[Requires Approval]** Nothing runs until you approve this plan with the button below.""")
  
 if st.button("✅ Approve Plan & Execute Assessment"):
     if not validate_target(target_host):
@@ -158,6 +166,7 @@ if st.button("✅ Approve Plan & Execute Assessment"):
             triage_analysis = run_ai_correlation(st.session_state["current_findings"])
             st.session_state["triage_report"] = triage_analysis
             add_audit_entry(f"Correlation completed via {triage_analysis.get('provider_used')}", "OK")
+            st.rerun()
  
 # Display Findings
 if st.session_state.get("current_findings"):
@@ -213,7 +222,7 @@ if st.session_state.get("current_findings"):
 if st.session_state.get("triage_report"):
     report = st.session_state["triage_report"]
     st.markdown("---")
-    st.subheader("🧠 Contextual Risk Synthesis")
+    st.subheader("Contextual Risk Synthesis")
     st.write(f"**Overall Posture:** `{report.get('overall_risk_score')}` | **Engine:** `{report.get('provider_used')}`")
     if report.get("fallback_reason"):
         st.error(f"AI engines unavailable, deterministic fallback used. Reason: {report.get('fallback_reason')}")
@@ -223,11 +232,11 @@ if st.session_state.get("triage_report"):
     rejected_ids = {str(f.get("id")) for f in st.session_state.get("current_findings", []) if f.get("status") == "Rejected by Analyst"}
     active_actions = [a for a in report.get("prioritized_actions", []) if str(a.get("finding_id")) not in rejected_ids]
     if active_actions:
-        st.write("### 🎯 Prioritized Remediation Roadmap")
+        st.write("### Prioritized Remediation Roadmap")
         st.table(pd.DataFrame(active_actions))
  
     st.markdown("---")
-    st.subheader("📄 Export Assessment Report")
+    st.subheader("Export Assessment Report")
     try:
         pdf_bytes = generate_pdf_report(
             target=target_input,
